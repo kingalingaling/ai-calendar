@@ -21,7 +21,11 @@ export async function getAuthUrl(req, res, next) {
 
 export async function handleGoogleCallback(req, res, next) {
   try {
-    const { code } = req.query;
+    const { code, error, error_description } = req.query;
+    if (error) {
+      logger.warn(`Google OAuth returned error: ${error} - ${error_description || ''}`);
+      return res.redirect(`${env.CLIENT_URL}?auth=failed&reason=${encodeURIComponent(error_description || error)}`);
+    }
     if (!code) {
       return res.redirect(`${env.CLIENT_URL}?auth=failed&reason=no_code`);
     }

@@ -67,6 +67,23 @@ export function App() {
     checkAuth();
   }, [checkAuth]);
 
+  // Handle OAuth callback parameters (?auth=success or ?auth=failed)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authStatus = params.get('auth');
+    const reason = params.get('reason');
+
+    if (authStatus === 'success') {
+      showToast('🎉 Google Calendar connected successfully!');
+      checkAuth();
+      fetchAgenda();
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (authStatus === 'failed') {
+      showToast(`Google Sign-In failed: ${reason || 'Access denied'}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [checkAuth, fetchAgenda]);
+
   useEffect(() => {
     fetchAgenda();
   }, [fetchAgenda]);
