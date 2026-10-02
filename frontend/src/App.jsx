@@ -20,7 +20,7 @@ export function App() {
   // User auth state
   const [user, setUser] = useState(null);
 
-  // Agenda events
+  // Agenda events & tasks
   const [events, setEvents] = useState([]);
   const [isLoadingAgenda, setIsLoadingAgenda] = useState(true);
 
@@ -72,6 +72,12 @@ export function App() {
     const params = new URLSearchParams(window.location.search);
     const authStatus = params.get('auth');
     const reason = params.get('reason');
+    const token = params.get('token');
+
+    if (token) {
+      // Persist Bearer token in localStorage (vital for iPhone Safari cross-domain ITP)
+      localStorage.setItem('ai_calendar_token', token);
+    }
 
     if (authStatus === 'success') {
       showToast('🎉 Google Calendar connected successfully!');
@@ -104,12 +110,37 @@ export function App() {
 
   const handleLogout = async () => {
     try {
+      localStorage.removeItem('ai_calendar_token');
       await api.post('/auth/logout');
       await checkAuth();
       await fetchAgenda();
       showToast('Logged out of Google Calendar.');
     } catch (e) {
       console.error('Logout error:', e);
+    }
+  };
+
+  // Toggle task complete / pending
+  const handleToggleTask = async (id) => {
+    const target = events.find(e => e.id === id);
+    if (!target) return;
+    const nextStatus = !target.completed;
+
+    // Optimistic UI update
+    setEvents(prev => prev.map(e => e.id === id ? { ...e, completed: nextStatus } : e));
+
+    if (nextStatus && 'vibrate' in navigator) {
+      navigator.vibrate(20);
+    }
+
+    try {
+      await api.patch(`/agenda/items/${id}/toggle`, { completed: nextStatus });
+      showToast(nextStatus ? 'Task marked complete ✓' : 'Task marked pending');
+    } catch (e) {
+      console.error('Failed to toggle task status:', e);
+      // Revert optimistic update
+      setEvents(prev => prev.map(e => e.id === id ? { ...e, completed: !nextStatus } : e));
+      showToast('Failed to update task status.');
     }
   };
 
@@ -142,7 +173,7 @@ export function App() {
       setProposalData(null);
       await fetchAgenda();
       setActiveTab('agenda');
-      showToast(`✨ Successfully added ${res.data.count} event(s) to your calendar!`);
+      showToast(`✨ Successfully added ${res.data.count} item(s) to your calendar!`);
 
       // Trigger haptic feedback if mobile supported
       if ('vibrate' in navigator) {
@@ -150,21 +181,21 @@ export function App() {
       }
     } catch (err) {
       console.error('Commit failed:', err);
-      showToast('Failed to save events to calendar.');
+      showToast('Failed to save items to calendar.');
     } finally {
       setIsCommitting(false);
     }
   };
 
-  // Delete an event
+  // Delete an event or task
   const handleDeleteEvent = async (id) => {
     try {
       await api.delete(`/agenda/events/${id}`);
       setEvents((prev) => prev.filter((e) => e.id !== id));
-      showToast('Event removed from calendar.');
+      showToast('Item removed from calendar.');
     } catch (e) {
       console.error('Delete failed:', e);
-      showToast('Failed to delete event.');
+      showToast('Failed to delete item.');
     }
   };
 
@@ -196,6 +227,7 @@ export function App() {
               events={events}
               isLoading={isLoadingAgenda}
               onDeleteEvent={handleDeleteEvent}
+              onToggleTask={handleToggleTask}
             />
           </div>
         )}
@@ -206,7 +238,7 @@ export function App() {
             <div className="text-center space-y-1 py-1">
               <h2 className="text-lg font-bold text-neutral-100">Brain Dump to Schedule</h2>
               <p className="text-xs text-neutral-400">
-                Dictate or type your tasks. Zero timestamps needed — Gemini automatically finds your optimal slots and overflows to Tomorrow if full.
+                Dictate or type your schedule. Gemini automatically differentiates between meetings and checkable tasks, finds optimal slots, and overflows to Tomorrow if full.
               </p>
             </div>
 

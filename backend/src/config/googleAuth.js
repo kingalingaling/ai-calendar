@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 export const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
 ];

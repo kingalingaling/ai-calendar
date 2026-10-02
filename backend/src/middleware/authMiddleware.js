@@ -1,23 +1,46 @@
 import { createAuthenticatedClient } from '../config/googleAuth.js';
+import { getSession, updateSessionTokens } from '../config/sessionStore.js';
 
 export function attachAuth(req, res, next) {
-  const tokens = req.session?.tokens;
+  let tokens = req.session?.tokens;
+  let user = req.session?.user;
+  let bearerToken = null;
+
+  // Check Authorization Bearer header first (crucial for iOS Safari cross-domain ITP)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    bearerToken = authHeader.split(' ')[1]?.trim();
+    if (bearerToken) {
+      const sessionData = getSession(bearerToken);
+      if (sessionData) {
+        tokens = sessionData.tokens;
+        user = sessionData.user;
+      }
+    }
+  }
 
   if (tokens) {
     req.authClient = createAuthenticatedClient(tokens, (updatedTokens) => {
-      req.session.tokens = updatedTokens;
+      if (req.session) {
+        req.session.tokens = updatedTokens;
+      }
+      if (bearerToken) {
+        updateSessionTokens(bearerToken, updatedTokens);
+      }
     });
-    req.user = req.session.user || null;
+    req.user = user || null;
+    req.bearerToken = bearerToken;
   } else {
     req.authClient = null;
     req.user = null;
+    req.bearerToken = null;
   }
 
   next();
 }
 
 export function requireAuth(req, res, next) {
-  if (!req.session?.tokens) {
+  if (!req.authClient) {
     return res.status(401).json({
       error: 'UNAUTHENTICATED',
       message: 'Please authenticate with Google Calendar to access this endpoint.',

@@ -1,4 +1,6 @@
+import { randomUUID } from 'crypto';
 import { getAuthorizationUrl, exchangeCodeForTokens, fetchGoogleProfile } from '../config/googleAuth.js';
+import { saveSession, removeSession } from '../config/sessionStore.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -33,16 +35,26 @@ export async function handleGoogleCallback(req, res, next) {
     const tokens = await exchangeCodeForTokens(code);
     const profile = await fetchGoogleProfile(tokens);
 
-    req.session.tokens = tokens;
-    req.session.user = {
+    const user = {
       id: profile.id,
       email: profile.email,
       name: profile.name,
       picture: profile.picture,
     };
 
+    // 1. Save in traditional session cookie (for browsers supporting it)
+    if (req.session) {
+      req.session.tokens = tokens;
+      req.session.user = user;
+    }
+
+    // 2. Generate a Bearer token and store in sessionStore (crucial for iOS Safari ITP)
+    const sessionToken = randomUUID();
+    saveSession(sessionToken, { tokens, user });
+
     logger.info(`✅ User authenticated successfully: ${profile.email}`);
-    res.redirect(`${env.CLIENT_URL}?auth=success`);
+    // Pass token in URL so client can store in localStorage
+    res.redirect(`${env.CLIENT_URL}?auth=success&token=${sessionToken}`);
   } catch (err) {
     logger.error('OAuth Callback error:', err.message);
     res.redirect(`${env.CLIENT_URL}?auth=failed&reason=${encodeURIComponent(err.message)}`);
@@ -50,11 +62,11 @@ export async function handleGoogleCallback(req, res, next) {
 }
 
 export function getCurrentUser(req, res) {
-  if (req.session?.tokens) {
+  if (req.authClient && req.user) {
     return res.json({
       authenticated: true,
       mode: 'google',
-      user: req.session.user,
+      user: req.user,
     });
   }
 
@@ -71,9 +83,16 @@ export function getCurrentUser(req, res) {
 }
 
 export function logout(req, res, next) {
-  req.session.destroy((err) => {
-    if (err) return next(err);
-    res.clearCookie('connect.sid');
+  if (req.bearerToken) {
+    removeSession(req.bearerToken);
+  }
+
+  if (req.session) {
+    req.session.destroy((err) => {
+      res.clearCookie('connect.sid');
+      res.json({ success: true, message: 'Logged out successfully' });
+    });
+  } else {
     res.json({ success: true, message: 'Logged out successfully' });
-  });
+  }
 }

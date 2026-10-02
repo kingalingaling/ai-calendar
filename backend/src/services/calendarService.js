@@ -12,15 +12,48 @@ let mockCalendarEvents = [
     end: { dateTime: '2026-10-01T09:30:00+01:00', timeZone: TIMEZONE },
     colorId: '1',
     htmlLink: 'https://calendar.google.com',
+    extendedProperties: {
+      private: {
+        entryType: 'event',
+        completed: 'false',
+        aiScheduled: 'true',
+        category: 'meeting_call',
+      },
+    },
   },
   {
-    id: 'demo-lunch-02',
+    id: 'demo-task-02',
+    summary: 'Review Q3 Financial Audit',
+    description: 'Audit report review and variance analysis',
+    start: { dateTime: '2026-10-01T10:00:00+01:00', timeZone: TIMEZONE },
+    end: { dateTime: '2026-10-01T11:30:00+01:00', timeZone: TIMEZONE },
+    colorId: '9',
+    htmlLink: 'https://calendar.google.com',
+    extendedProperties: {
+      private: {
+        entryType: 'task',
+        completed: 'false',
+        aiScheduled: 'true',
+        category: 'deep_work',
+      },
+    },
+  },
+  {
+    id: 'demo-lunch-03',
     summary: 'Lunch & Recharge',
     description: 'Break',
     start: { dateTime: '2026-10-01T12:30:00+01:00', timeZone: TIMEZONE },
     end: { dateTime: '2026-10-01T13:30:00+01:00', timeZone: TIMEZONE },
     colorId: '5',
     htmlLink: 'https://calendar.google.com',
+    extendedProperties: {
+      private: {
+        entryType: 'event',
+        completed: 'false',
+        aiScheduled: 'false',
+        category: 'break',
+      },
+    },
   },
 ];
 
@@ -41,8 +74,8 @@ export async function listCalendarEvents(authClient, timeMin, timeMax) {
   if (!calendar) {
     logger.info('📱 [Demo Mode] Returning in-memory demo calendar events.');
     return mockCalendarEvents.filter(ev => {
-      const evStart = ev.start.dateTime || ev.start.date;
-      const evEnd = ev.end.dateTime || ev.end.date;
+      const evStart = ev.start?.dateTime || ev.start?.date;
+      const evEnd = ev.end?.dateTime || ev.end?.date;
       return evEnd >= timeMin && evStart <= timeMax;
     });
   }
@@ -65,16 +98,19 @@ export async function listCalendarEvents(authClient, timeMin, timeMax) {
 }
 
 /**
- * Inserts a single event into Google Calendar
+ * Inserts a single event/task into Google Calendar
  */
 export async function insertCalendarEvent(authClient, eventData) {
   const calendar = getClient(authClient);
 
+  const isTask = (eventData.entry_type || eventData.entryType) === 'task';
+  const cleanSummary = eventData.summary || 'Untitled';
+
   const payload = {
-    summary: eventData.summary,
+    summary: cleanSummary,
     description: eventData.description || '',
     location: eventData.location || '',
-    colorId: eventData.colorId || '9',
+    colorId: eventData.colorId || (isTask ? '9' : '1'),
     start: {
       dateTime: eventData.start_time || eventData.start,
       timeZone: TIMEZONE,
@@ -86,7 +122,9 @@ export async function insertCalendarEvent(authClient, eventData) {
     extendedProperties: {
       private: {
         aiScheduled: 'true',
-        category: eventData.category || 'task',
+        entryType: isTask ? 'task' : 'event',
+        completed: String(eventData.completed || false),
+        category: eventData.category || (isTask ? 'deep_work' : 'meeting_call'),
         autoSuggested: String(eventData.auto_suggested_time || false),
         isSpillover: String(eventData.is_spillover || false),
       },
@@ -121,6 +159,65 @@ export async function batchInsertEvents(authClient, eventsList = []) {
     created.push(res);
   }
   return created;
+}
+
+/**
+ * Toggles an item's completed status (for tasks)
+ */
+export async function toggleItemComplete(authClient, itemId, forceStatus) {
+  const calendar = getClient(authClient);
+
+  if (!calendar) {
+    const item = mockCalendarEvents.find(e => e.id === itemId);
+    if (!item) throw new Error('Item not found in demo calendar');
+
+    const currentCompleted = item.extendedProperties?.private?.completed === 'true';
+    const nextStatus = forceStatus !== undefined ? forceStatus : !currentCompleted;
+
+    if (!item.extendedProperties) item.extendedProperties = { private: {} };
+    if (!item.extendedProperties.private) item.extendedProperties.private = {};
+
+    item.extendedProperties.private.completed = String(nextStatus);
+    item.extendedProperties.private.entryType = 'task';
+
+    return {
+      id: item.id,
+      completed: nextStatus,
+      entryType: 'task',
+    };
+  }
+
+  // Live Google Calendar
+  const existing = await calendar.events.get({
+    calendarId: 'primary',
+    eventId: itemId,
+  });
+
+  const priv = existing.data.extendedProperties?.private || {};
+  const currentCompleted = priv.completed === 'true';
+  const nextStatus = forceStatus !== undefined ? forceStatus : !currentCompleted;
+
+  const updatedPriv = {
+    ...priv,
+    entryType: 'task',
+    completed: String(nextStatus),
+  };
+
+  const res = await calendar.events.patch({
+    calendarId: 'primary',
+    eventId: itemId,
+    requestBody: {
+      extendedProperties: {
+        private: updatedPriv,
+      },
+    },
+  });
+
+  return {
+    id: res.data.id,
+    completed: nextStatus,
+    entryType: 'task',
+  };
 }
 
 /**

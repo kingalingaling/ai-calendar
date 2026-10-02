@@ -15,17 +15,17 @@ if (env.GEMINI_API_KEY) {
 export const scheduleEventsToolSchema = {
   type: 'function',
   name: 'schedule_events',
-  description: 'Proposes an optimized, conflict-free schedule across one or more days. Infers durations and assigns optimal energy-aligned time slots when timestamps are omitted. Overflows excess tasks to the next day when daily capacity is reached.',
+  description: 'Proposes an optimized, conflict-free schedule across one or more days. Infers durations, assigns energy-aligned time slots, differentiates between meetings/events and checkable tasks, and overflows excess tasks to the next day when daily capacity is reached.',
   parameters: {
     type: 'object',
     properties: {
       summary_rationale: {
         type: 'string',
-        description: 'A brief executive explanation of the scheduling decisions and any multi-day spillover rationale.',
+        description: 'A brief executive explanation of the scheduling decisions, task vs event classifications, and any multi-day spillover rationale.',
       },
       scheduled_days: {
         type: 'array',
-        description: 'List of days containing proposed events.',
+        description: 'List of days containing proposed events and tasks.',
         items: {
           type: 'object',
           properties: {
@@ -39,6 +39,11 @@ export const scheduleEventsToolSchema = {
                 type: 'object',
                 properties: {
                   summary: { type: 'string', description: 'Clear title of the task or appointment.' },
+                  entry_type: {
+                    type: 'string',
+                    enum: ['event', 'task'],
+                    description: "Set to 'event' for meetings with people, client calls, syncs, webinars, flights, doctor visits, or scheduled events. Set to 'task' for actionable to-dos, deep work blocks, coding, writing, workouts, errands, or items the user can check off when completed.",
+                  },
                   description: { type: 'string', description: 'Context notes or agenda details.' },
                   category: {
                     type: 'string',
@@ -71,10 +76,10 @@ export const scheduleEventsToolSchema = {
                   },
                   reasoning: {
                     type: 'string',
-                    description: 'Energy fit and conflict-avoidance justification.',
+                    description: 'Energy fit, classification reason, and conflict-avoidance justification.',
                   },
                 },
-                required: ['summary', 'start_time', 'end_time', 'category', 'auto_suggested_time', 'is_spillover', 'reasoning'],
+                required: ['summary', 'entry_type', 'start_time', 'end_time', 'category', 'auto_suggested_time', 'is_spillover', 'reasoning'],
               },
             },
           },
@@ -123,7 +128,12 @@ Current local context: ${JSON.stringify(formattedContext, null, 2)}
 Default Workday: ${workingHours.start} to ${workingHours.end} WAT.
 
 CORE CAPABILITIES & RULES:
-1. ZERO-TIMESTAMP SCHEDULING:
+1. INTELLIGENT EVENT VS. TASK DIFFERENTIATION:
+   - You MUST differentiate between 'event' and 'task':
+     * entry_type="event": Meetings with other people, client calls, team syncs, interviews, webinars, doctor/dentist visits, flights, or scheduled appointments with external attendees.
+     * entry_type="task": Personal to-dos, deliverables, deep work blocks, coding, writing, workouts, gym, errands, reviews, or actionable tasks that the user can check off as completed.
+
+2. ZERO-TIMESTAMP SCHEDULING:
    - When the user lists tasks without specific times (e.g. "review financials, gym, call client"), you MUST automatically assign optimal time slots.
    - Match by energy levels:
      * Morning (08:30 - 12:30): High-focus deep work, complex writing, strategy.
@@ -132,15 +142,15 @@ CORE CAPABILITIES & RULES:
      * Twilight (16:30 - 18:30): Workouts, fitness, end-of-day wrap-up.
    - Infer sensible durations (calls: 20-30m, deep work: 60-90m, workouts: 45m, admin: 30m).
 
-2. MULTI-DAY OVERFLOW & SPILLOVER:
+3. MULTI-DAY OVERFLOW & SPILLOVER:
    - Never cram tasks past the ${workingHours.end} cutoff or exceed reasonable daily working capacity.
    - If tasks cannot fit comfortably on Day 1 (${targetDays[0]?.date}), automatically spill over remaining tasks to Day 2 (${targetDays[1]?.date}) and mark "is_spillover": true with an explanation.
 
-3. STRICT COLLISION AVOIDANCE:
+4. STRICT COLLISION AVOIDANCE:
    - NEVER overlap with any existing commitment.
    - Output all timestamps with explicit '+01:00' timezone offset.
 
-4. YOU MUST CALL the 'schedule_events' function.
+5. YOU MUST CALL the 'schedule_events' function.
 `;
 
     const interaction = await aiClient.interactions.create({
@@ -152,7 +162,7 @@ CORE CAPABILITIES & RULES:
 
     for (const step of interaction.steps || []) {
       if (step.type === 'function_call' && step.name === 'schedule_events') {
-        logger.info('✨ Gemini 3.8 Flash returned structured schedule_events tool call.');
+        logger.info('✨ Gemini 3.8 Flash returned structured schedule_events tool call with event/task classification.');
         return step.arguments;
       }
     }
@@ -181,6 +191,9 @@ export function generateHeuristicSchedule({ userPrompt, targetDays, existingEven
 
   for (const taskText of rawTasks) {
     const details = inferTaskDetails(taskText);
+    const isMeetingOrEvent = /\b(meeting|sync|call with|doctor|interview|webinar|appointment|catch up with|dinner with|lunch with|flight)\b/i.test(taskText);
+    const entryType = isMeetingOrEvent ? 'event' : 'task';
+
     let placed = false;
 
     while (currentDayIndex < targetDays.length && !placed) {
@@ -202,7 +215,8 @@ export function generateHeuristicSchedule({ userPrompt, targetDays, existingEven
 
         scheduledDays[currentDayIndex].events.push({
           summary: taskText.replace(/^\w/, c => c.toUpperCase()),
-          description: `Auto-scheduled ${details.category.replace('_', ' ')}`,
+          entry_type: entryType,
+          description: `Auto-scheduled ${entryType === 'event' ? 'meeting/event' : 'to-do task'} (${details.category.replace('_', ' ')})`,
           category: details.category,
           start_time: slotStart.toISO(),
           end_time: slotEnd.toISO(),
@@ -210,9 +224,9 @@ export function generateHeuristicSchedule({ userPrompt, targetDays, existingEven
           is_spillover: currentDayIndex > 0,
           spillover_reason: currentDayIndex > 0 ? 'Moved to next day to avoid daily overbooking.' : '',
           color_id: details.colorId,
-          reasoning: currentDayIndex > 0
-            ? 'Allotted to next day due to working hours limit.'
-            : `Fitted in open ${details.category.replace('_', ' ')} window.`,
+          reasoning: entryType === 'event'
+            ? 'Classified as an event (scheduled meeting/appointment).'
+            : 'Classified as a checkable task that can be marked complete.',
         });
         placed = true;
       } else {
@@ -226,8 +240,8 @@ export function generateHeuristicSchedule({ userPrompt, targetDays, existingEven
 
   return {
     summary_rationale: spilloverCount > 0
-      ? `Scheduled ${rawTasks.length} tasks across ${targetDays.length} days with ${spilloverCount} task(s) rolled over to subsequent days.`
-      : `Successfully scheduled all ${rawTasks.length} tasks into optimal open slots.`,
+      ? `Scheduled ${rawTasks.length} items across ${targetDays.length} days (${spilloverCount} rolled over to subsequent days). Differentiated into events and tasks.`
+      : `Successfully scheduled all ${rawTasks.length} items with intelligent event and task differentiation.`,
     scheduled_days: scheduledDays,
   };
 }

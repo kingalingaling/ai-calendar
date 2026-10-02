@@ -1,5 +1,5 @@
 import { getDayBoundsWAT, getMultiDayBoundsWAT, TIMEZONE } from '../config/timezone.js';
-import { listCalendarEvents, updateCalendarEvent, deleteCalendarEvent } from '../services/calendarService.js';
+import { listCalendarEvents, updateCalendarEvent, deleteCalendarEvent, toggleItemComplete } from '../services/calendarService.js';
 
 export async function getAgenda(req, res, next) {
   try {
@@ -21,22 +21,29 @@ export async function getAgenda(req, res, next) {
 
     const events = await listCalendarEvents(req.authClient, timeMin, timeMax);
 
-    // Format events for mobile UI
-    const formattedEvents = events.map(e => ({
-      id: e.id,
-      summary: e.summary || '(Untitled Event)',
-      description: e.description || '',
-      location: e.location || '',
-      start: e.start?.dateTime || e.start?.date,
-      end: e.end?.dateTime || e.end?.date,
-      isAllDay: !e.start?.dateTime,
-      colorId: e.colorId || '9',
-      htmlLink: e.htmlLink,
-      aiScheduled: e.extendedProperties?.private?.aiScheduled === 'true',
-      category: e.extendedProperties?.private?.category || 'task',
-      autoSuggested: e.extendedProperties?.private?.autoSuggested === 'true',
-      isSpillover: e.extendedProperties?.private?.isSpillover === 'true',
-    }));
+    // Format events for mobile UI with entryType and completed status
+    const formattedEvents = events.map(e => {
+      const priv = e.extendedProperties?.private || {};
+      const isTask = priv.entryType === 'task' || (!e.attendees || e.attendees.length === 0) && (priv.category === 'deep_work' || priv.category === 'admin' || priv.category === 'health_fitness');
+
+      return {
+        id: e.id,
+        summary: e.summary || '(Untitled Event)',
+        description: e.description || '',
+        location: e.location || '',
+        start: e.start?.dateTime || e.start?.date,
+        end: e.end?.dateTime || e.end?.date,
+        isAllDay: !e.start?.dateTime,
+        colorId: e.colorId || '9',
+        htmlLink: e.htmlLink,
+        entryType: priv.entryType || (isTask ? 'task' : 'event'),
+        completed: priv.completed === 'true',
+        aiScheduled: priv.aiScheduled === 'true',
+        category: priv.category || 'task',
+        autoSuggested: priv.autoSuggested === 'true',
+        isSpillover: priv.isSpillover === 'true',
+      };
+    });
 
     res.json({
       success: true,
@@ -46,6 +53,17 @@ export async function getAgenda(req, res, next) {
       days: daysMeta,
       events: formattedEvents,
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function toggleComplete(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { completed } = req.body;
+    const result = await toggleItemComplete(req.authClient, id, completed);
+    res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Check, Clock, Sparkles, AlertTriangle, Trash2, Calendar, ArrowRight } from 'lucide-react';
+import { X, Check, Clock, Sparkles, AlertTriangle, Trash2, Calendar, ArrowRight, CheckSquare } from 'lucide-react';
 import { DateTime } from 'luxon';
 
 const CATEGORY_COLORS = {
@@ -23,7 +23,10 @@ export function MultiDayPreviewModal({
     // Clone proposal to allow in-modal editing
     return (proposalData.schedule || []).map(dayGroup => ({
       ...dayGroup,
-      events: [...(dayGroup.events || [])],
+      events: (dayGroup.events || []).map(ev => ({
+        ...ev,
+        entry_type: ev.entry_type || 'task',
+      })),
     }));
   });
 
@@ -56,8 +59,9 @@ export function MultiDayPreviewModal({
           description: ev.description,
           start: ev.start_time || ev.start,
           end: ev.end_time || ev.end,
-          colorId: ev.color_id || '9',
+          colorId: ev.color_id || (ev.entry_type === 'event' ? '1' : '9'),
           category: ev.category,
+          entry_type: ev.entry_type || 'task',
           auto_suggested_time: ev.auto_suggested_time,
           is_spillover: ev.is_spillover,
         });
@@ -82,7 +86,7 @@ export function MultiDayPreviewModal({
             <div>
               <h2 className="text-base font-semibold text-neutral-100">Review Proposed Schedule</h2>
               <p className="text-xs text-neutral-400">
-                {totalEventsCount} event{totalEventsCount !== 1 ? 's' : ''} across {scheduleState.length} day{scheduleState.length !== 1 ? 's' : ''}
+                {totalEventsCount} item{totalEventsCount !== 1 ? 's' : ''} across {scheduleState.length} day{scheduleState.length !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
@@ -124,13 +128,13 @@ export function MultiDayPreviewModal({
                   <span>{dayGroup.dayLabel}</span>
                 </span>
                 <span className="text-[11px] font-mono text-neutral-500">
-                  {dayGroup.events.length} task{dayGroup.events.length !== 1 ? 's' : ''}
+                  {dayGroup.events.length} item{dayGroup.events.length !== 1 ? 's' : ''}
                 </span>
               </div>
 
               {dayGroup.events.length === 0 ? (
                 <div className="text-xs text-neutral-500 italic py-2">
-                  No tasks scheduled for this day.
+                  No items scheduled for this day.
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -138,6 +142,7 @@ export function MultiDayPreviewModal({
                     const categoryMeta = CATEGORY_COLORS[event.category] || CATEGORY_COLORS.deep_work;
                     const startTimeFormatted = DateTime.fromISO(event.start_time, { zone: 'Africa/Lagos' }).toFormat('h:mm a');
                     const endTimeFormatted = DateTime.fromISO(event.end_time, { zone: 'Africa/Lagos' }).toFormat('h:mm a');
+                    const isTask = event.entry_type === 'task';
 
                     return (
                       <div
@@ -155,14 +160,29 @@ export function MultiDayPreviewModal({
                             type="button"
                             onClick={() => handleRemoveEvent(dayIdx, evIdx)}
                             className="text-neutral-500 hover:text-red-400 p-1 transition-colors"
-                            title="Exclude this event"
+                            title="Exclude this item"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
 
-                        {/* Badges */}
+                        {/* Badges & Type Switcher */}
                         <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                          {/* Interactive Event vs Task Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateEvent(dayIdx, evIdx, 'entry_type', isTask ? 'event' : 'task')}
+                            className={`px-2 py-0.5 rounded-md border font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                              isTask
+                                ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/50 hover:bg-emerald-900/60'
+                                : 'bg-blue-950/70 text-blue-300 border-blue-700/50 hover:bg-blue-900/60'
+                            }`}
+                            title="Click to toggle between checkable Task and calendar Event"
+                          >
+                            {isTask ? <CheckSquare className="w-3 h-3 text-emerald-400" /> : <Calendar className="w-3 h-3 text-blue-400" />}
+                            <span>{isTask ? 'Task (Checkable)' : 'Event / Meeting'}</span>
+                          </button>
+
                           <span className={`px-2 py-0.5 rounded-md border font-medium ${categoryMeta.bg} ${categoryMeta.text} ${categoryMeta.border}`}>
                             {categoryMeta.label}
                           </span>

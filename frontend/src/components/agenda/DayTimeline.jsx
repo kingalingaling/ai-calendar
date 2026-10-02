@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Trash2, ExternalLink, Sparkles, MapPin } from 'lucide-react';
+import { Clock, Trash2, ExternalLink, Sparkles, MapPin, CheckCircle2, Circle, Calendar, CheckSquare } from 'lucide-react';
 import { DateTime } from 'luxon';
 
 export function DayTimeline({
@@ -10,6 +10,7 @@ export function DayTimeline({
   events = [],
   isLoading,
   onDeleteEvent,
+  onToggleTask,
 }) {
   const watNow = DateTime.now().setZone('Africa/Lagos');
   const todayStr = watNow.toFormat('yyyy-MM-dd');
@@ -56,7 +57,7 @@ export function DayTimeline({
         })}
       </div>
 
-      {/* Events List */}
+      {/* Events & Tasks List */}
       <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-2xl p-4 shadow-xl backdrop-blur-sm min-h-[360px]">
         <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-800">
           <div className="flex items-center gap-2">
@@ -66,7 +67,7 @@ export function DayTimeline({
             </h2>
           </div>
           <span className="text-xs font-mono text-neutral-400">
-            {events.length} event{events.length !== 1 ? 's' : ''}
+            {events.length} item{events.length !== 1 ? 's' : ''}
           </span>
         </div>
 
@@ -80,9 +81,9 @@ export function DayTimeline({
             <div className="w-12 h-12 rounded-2xl bg-neutral-800/50 flex items-center justify-center text-neutral-400 mb-1">
               <Clock className="w-6 h-6" />
             </div>
-            <p className="text-sm font-medium text-neutral-300">No events for this day</p>
+            <p className="text-sm font-medium text-neutral-300">No entries for this day</p>
             <p className="text-xs text-neutral-500 max-w-xs">
-              Your day is completely open. Tap the <span className="text-emerald-400">AI Schedule</span> button to auto-allot your tasks.
+              Your day is open. Tap the <span className="text-emerald-400">AI Schedule</span> button to auto-allot your meetings and tasks.
             </p>
           </div>
         ) : (
@@ -96,59 +97,103 @@ export function DayTimeline({
               </div>
             )}
 
-            {events.map((event) => {
-              const startDt = event.start ? DateTime.fromISO(event.start, { zone: 'Africa/Lagos' }) : null;
-              const endDt = event.end ? DateTime.fromISO(event.end, { zone: 'Africa/Lagos' }) : null;
+            {events.map((item) => {
+              const startDt = item.start ? DateTime.fromISO(item.start, { zone: 'Africa/Lagos' }) : null;
+              const endDt = item.end ? DateTime.fromISO(item.end, { zone: 'Africa/Lagos' }) : null;
+              const isTask = item.entryType === 'task';
+              const isCompleted = Boolean(item.completed);
 
               return (
                 <div
-                  key={event.id}
-                  className="group relative bg-neutral-950/80 border border-neutral-800/90 hover:border-neutral-700 rounded-xl p-3 flex items-start justify-between gap-3 transition-all"
+                  key={item.id}
+                  className={`group relative border rounded-xl p-3 flex items-start gap-3 transition-all ${
+                    isCompleted
+                      ? 'bg-neutral-950/40 border-neutral-900 opacity-60'
+                      : isTask
+                      ? 'bg-neutral-950/80 border-neutral-800/90 hover:border-neutral-700'
+                      : 'bg-neutral-950/90 border-blue-900/30 hover:border-blue-700/50'
+                  }`}
                 >
+                  {/* Task Checkbox (Only for Tasks) */}
+                  {isTask ? (
+                    <button
+                      type="button"
+                      onClick={() => onToggleTask && onToggleTask(item.id)}
+                      className="mt-0.5 text-neutral-400 hover:text-emerald-400 transition-colors shrink-0"
+                      title={isCompleted ? 'Mark as incomplete' : 'Mark as complete'}
+                    >
+                      {isCompleted ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400 fill-emerald-950" />
+                      ) : (
+                        <Circle className="w-5 h-5 hover:scale-105 transition-transform" />
+                      )}
+                    </button>
+                  ) : (
+                    <div className="mt-1 text-blue-400 shrink-0" title="Fixed Event / Meeting">
+                      <Calendar className="w-4 h-4" />
+                    </div>
+                  )}
+
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-mono font-medium text-emerald-400/90 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                      <span className={`text-xs font-mono font-medium px-2 py-0.5 rounded-md border ${
+                        isTask
+                          ? 'text-emerald-400/90 bg-emerald-500/10 border-emerald-500/20'
+                          : 'text-blue-400/90 bg-blue-500/10 border-blue-500/20'
+                      }`}>
                         {startDt && endDt
                           ? `${startDt.toFormat('h:mm a')} - ${endDt.toFormat('h:mm a')}`
                           : 'All Day'}
                       </span>
 
-                      {event.aiScheduled && (
+                      {/* Entry Type Badge */}
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                        isTask
+                          ? 'text-emerald-300 bg-emerald-950/50 border-emerald-800/40'
+                          : 'text-blue-300 bg-blue-950/50 border-blue-800/40'
+                      }`}>
+                        {isTask ? <CheckSquare className="w-2.5 h-2.5" /> : <Calendar className="w-2.5 h-2.5" />}
+                        <span>{isTask ? 'To-Do Task' : 'Event / Meeting'}</span>
+                      </span>
+
+                      {item.aiScheduled && (
                         <span className="flex items-center gap-1 text-[10px] font-medium text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
                           <Sparkles className="w-2.5 h-2.5" />
                           <span>AI Placed</span>
                         </span>
                       )}
 
-                      {event.isSpillover && (
+                      {item.isSpillover && (
                         <span className="text-[10px] font-medium text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
                           ⚡ Rollover
                         </span>
                       )}
                     </div>
 
-                    <h3 className="text-sm font-semibold text-neutral-100 truncate">
-                      {event.summary}
+                    <h3 className={`text-sm font-semibold truncate ${
+                      isCompleted ? 'line-through text-neutral-500' : 'text-neutral-100'
+                    }`}>
+                      {item.summary}
                     </h3>
 
-                    {event.description && (
-                      <p className="text-xs text-neutral-400 line-clamp-1">
-                        {event.description}
+                    {item.description && (
+                      <p className={`text-xs line-clamp-1 ${isCompleted ? 'line-through text-neutral-600' : 'text-neutral-400'}`}>
+                        {item.description}
                       </p>
                     )}
 
-                    {event.location && (
+                    {item.location && (
                       <p className="text-[11px] text-neutral-500 flex items-center gap-1">
                         <MapPin className="w-3 h-3" />
-                        <span>{event.location}</span>
+                        <span>{item.location}</span>
                       </p>
                     )}
                   </div>
 
                   <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                    {event.htmlLink && (
+                    {item.htmlLink && (
                       <a
-                        href={event.htmlLink}
+                        href={item.htmlLink}
                         target="_blank"
                         rel="noreferrer"
                         className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors"
@@ -158,9 +203,9 @@ export function DayTimeline({
                       </a>
                     )}
                     <button
-                      onClick={() => onDeleteEvent(event.id)}
+                      onClick={() => onDeleteEvent(item.id)}
                       className="p-1.5 text-neutral-500 hover:text-red-400 rounded-lg hover:bg-neutral-800 transition-colors"
-                      title="Delete event"
+                      title="Delete item"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
