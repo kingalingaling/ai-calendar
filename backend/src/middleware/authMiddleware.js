@@ -6,7 +6,7 @@ export function attachAuth(req, res, next) {
   let user = req.session?.user;
   let bearerToken = null;
 
-  // Check Authorization Bearer header first (crucial for iOS Safari cross-domain ITP)
+  // Check Authorization Bearer header first (crucial for iOS Safari cross-domain ITP & stateless 14-day auth)
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     bearerToken = authHeader.split(' ')[1]?.trim();
@@ -25,7 +25,14 @@ export function attachAuth(req, res, next) {
         req.session.tokens = updatedTokens;
       }
       if (bearerToken) {
-        updateSessionTokens(bearerToken, updatedTokens);
+        const freshToken = updateSessionTokens(bearerToken, updatedTokens);
+        if (freshToken) {
+          try {
+            res.setHeader('X-New-Token', freshToken);
+          } catch (e) {
+            // Header may have already been sent in streaming responses
+          }
+        }
       }
     });
     req.user = user || null;

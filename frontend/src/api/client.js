@@ -21,3 +21,15 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Automatically update stored token if the backend rotated/refreshed it
+api.interceptors.response.use(
+  (response) => {
+    const newToken = response.headers['x-new-token'];
+    if (newToken) {
+      localStorage.setItem('ai_calendar_token', newToken);
+    }
+    return response;
+  },
+  (error) => Promise.reject(error)
+);

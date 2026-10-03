@@ -20,13 +20,14 @@ app.set('trust proxy', 1);
 app.use(cors({
   origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true,
+  exposedHeaders: ['X-New-Token', 'x-new-token'],
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Session management (stores Google OAuth tokens in session)
+// Session management (stores Google OAuth tokens in session, 14 days lifespan)
 app.use(session({
   secret: env.SESSION_SECRET,
   resave: false,
@@ -35,7 +36,7 @@ app.use(session({
     secure: env.NODE_ENV === 'production',
     httpOnly: true,
     sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 14 * 24 * 60 * 60 * 1000, // 14 days
   },
 }));
 

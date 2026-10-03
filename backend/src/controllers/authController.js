@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getAuthorizationUrl, exchangeCodeForTokens, fetchGoogleProfile } from '../config/googleAuth.js';
-import { saveSession, removeSession } from '../config/sessionStore.js';
+import { createEncryptedSession, removeSession } from '../config/sessionStore.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -48,11 +48,10 @@ export async function handleGoogleCallback(req, res, next) {
       req.session.user = user;
     }
 
-    // 2. Generate a Bearer token and store in sessionStore (crucial for iOS Safari ITP)
-    const sessionToken = randomUUID();
-    saveSession(sessionToken, { tokens, user });
+    // 2. Generate a 14-day stateless encrypted session token (survives container restarts, spin-downs, and Safari ITP)
+    const sessionToken = createEncryptedSession({ tokens, user });
 
-    logger.info(`✅ User authenticated successfully: ${profile.email}`);
+    logger.info(`✅ User authenticated successfully: ${profile.email} (14-day persistent session created)`);
     // Pass token in URL so client can store in localStorage
     res.redirect(`${env.CLIENT_URL}?auth=success&token=${sessionToken}`);
   } catch (err) {
