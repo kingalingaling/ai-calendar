@@ -8,8 +8,17 @@ import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/authRoutes.js';
 import scheduleRoutes from './routes/scheduleRoutes.js';
 import agendaRoutes from './routes/agendaRoutes.js';
+import contextRoutes from './routes/contextRoutes.js';
+import projectRoutes from './routes/projectRoutes.js';
+import taskRoutes from './routes/taskRoutes.js';
+import sheetsRoutes from './routes/sheetsRoutes.js';
+import gamificationRoutes from './routes/gamificationRoutes.js';
+import { initSchema } from './db/database.js';
 import { logger } from './utils/logger.js';
 import { TIMEZONE } from './config/timezone.js';
+
+// Initialize SQLite database schema
+initSchema();
 
 const app = express();
 
@@ -58,6 +67,11 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/agenda', agendaRoutes);
+app.use('/api/contexts', contextRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/sheets', sheetsRoutes);
+app.use('/api/gamification', gamificationRoutes);
 
 // Global error handler
 app.use(errorHandler);

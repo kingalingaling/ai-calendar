@@ -125,3 +125,46 @@ export async function rolloverTasks(req, res, next) {
     next(err);
   }
 }
+
+export async function autoBlockTasks(req, res, next) {
+  try {
+    const userId = req.user?.id || 'default_user';
+    const { targetDate, contextId, taskIds, allowSpillover, minBufferMinutes } = req.body;
+
+    const plan = await import('../services/autoScheduleService.js').then(m =>
+      m.planAutoSchedule({
+        userId,
+        authClient: req.authClient,
+        targetDate,
+        contextId,
+        taskIds,
+        allowSpillover,
+        minBufferMinutes,
+      })
+    );
+
+    res.json(plan);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function commitAutoTasks(req, res, next) {
+  try {
+    const userId = req.user?.id || 'default_user';
+    const { scheduledTasks } = req.body;
+
+    const result = await import('../services/autoScheduleService.js').then(m =>
+      m.commitAutoScheduledTasks({
+        userId,
+        authClient: req.authClient,
+        scheduledTasks,
+      })
+    );
+
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+

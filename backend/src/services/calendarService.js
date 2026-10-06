@@ -12,6 +12,8 @@ let mockCalendarEvents = [
     end: { dateTime: '2026-10-01T09:30:00+01:00', timeZone: TIMEZONE },
     colorId: '1',
     htmlLink: 'https://calendar.google.com',
+    entryType: 'event',
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }] },
     extendedProperties: {
       private: {
         entryType: 'event',
@@ -29,6 +31,7 @@ let mockCalendarEvents = [
     end: { dateTime: '2026-10-01T11:30:00+01:00', timeZone: TIMEZONE },
     colorId: '9',
     htmlLink: 'https://calendar.google.com',
+    entryType: 'task',
     extendedProperties: {
       private: {
         entryType: 'task',
@@ -46,6 +49,8 @@ let mockCalendarEvents = [
     end: { dateTime: '2026-10-01T13:30:00+01:00', timeZone: TIMEZONE },
     colorId: '5',
     htmlLink: 'https://calendar.google.com',
+    entryType: 'event',
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }] },
     extendedProperties: {
       private: {
         entryType: 'event',
@@ -60,16 +65,25 @@ let mockCalendarEvents = [
 /**
  * Returns Google Calendar client or null if in demo mode
  */
-function getClient(authClient) {
+function getCalendarClient(authClient) {
   if (!authClient) return null;
   return google.calendar({ version: 'v3', auth: authClient });
 }
 
 /**
- * Lists events for a given time window in Africa/Lagos
+ * Returns Google Tasks client or null if in demo mode
+ */
+function getTasksClient(authClient) {
+  if (!authClient) return null;
+  return google.tasks({ version: 'v1', auth: authClient });
+}
+
+/**
+ * Lists both events and native tasks for a given time window in Africa/Lagos
  */
 export async function listCalendarEvents(authClient, timeMin, timeMax) {
-  const calendar = getClient(authClient);
+  const calendar = getCalendarClient(authClient);
+  const tasksClient = getTasksClient(authClient);
 
   if (!calendar) {
     logger.info('📱 [Demo Mode] Returning in-memory demo calendar events.');
@@ -80,6 +94,9 @@ export async function listCalendarEvents(authClient, timeMin, timeMax) {
     });
   }
 
+  const results = [];
+
+  // 1. Fetch Calendar Events
   try {
     const res = await calendar.events.list({
       calendarId: 'primary',
@@ -90,22 +107,94 @@ export async function listCalendarEvents(authClient, timeMin, timeMax) {
       orderBy: 'startTime',
     });
 
-    return res.data.items || [];
+    results.push(...(res.data.items || []));
   } catch (err) {
     logger.error('Failed to fetch events from Google Calendar:', err.message);
-    throw err;
   }
+
+  // 2. Fetch Native Google Tasks (which appear on the calendar)
+  if (tasksClient) {
+    try {
+      const tasksRes = await tasksClient.tasks.list({
+        tasklist: '@default',
+        showCompleted: true,
+        showHidden: true,
+        dueMin: timeMin,
+        dueMax: timeMax,
+      });
+
+      const nativeTasks = (tasksRes.data.items || []).map(t => ({
+        id: t.id,
+        summary: t.title || '(Untitled Task)',
+        description: t.notes || '',
+        start: { dateTime: t.due || timeMin, timeZone: TIMEZONE },
+        end: { dateTime: t.due || timeMin, timeZone: TIMEZONE },
+        colorId: '9',
+        htmlLink: 'https://calendar.google.com',
+        isNativeTask: true,
+        entryType: 'task',
+        completed: t.status === 'completed',
+        extendedProperties: {
+          private: {
+            entryType: 'task',
+            completed: String(t.status === 'completed'),
+            aiScheduled: 'true',
+          },
+        },
+      }));
+
+      results.push(...nativeTasks);
+    } catch (err) {
+      logger.warn(`Google Tasks API list failed (${err.message}). Continuing with Calendar events.`);
+    }
+  }
+
+  return results;
 }
 
 /**
  * Inserts a single event/task into Google Calendar
+ * - Tasks: Created via Google Tasks API (or fallback with task properties)
+ * - Events: Created with exact 5-minute reminder popup override
  */
 export async function insertCalendarEvent(authClient, eventData) {
-  const calendar = getClient(authClient);
-
   const isTask = (eventData.entry_type || eventData.entryType) === 'task';
   const cleanSummary = eventData.summary || 'Untitled';
+  const calendar = getCalendarClient(authClient);
+  const tasksClient = getTasksClient(authClient);
 
+  // 1. If it is a Task and Google Tasks API is available: Create actual native Google Task!
+  if (isTask && tasksClient) {
+    try {
+      const taskDue = eventData.start_time || eventData.start || new Date().toISOString();
+      const res = await tasksClient.tasks.insert({
+        tasklist: '@default',
+        requestBody: {
+          title: cleanSummary,
+          notes: eventData.description || '',
+          due: taskDue,
+          status: eventData.completed ? 'completed' : 'needsAction',
+        },
+      });
+
+      logger.info(`✨ Created native Google Task on Calendar: "${cleanSummary}" (ID: ${res.data.id})`);
+      return {
+        id: res.data.id,
+        summary: res.data.title,
+        description: res.data.notes || '',
+        start: { dateTime: taskDue, timeZone: TIMEZONE },
+        end: { dateTime: taskDue, timeZone: TIMEZONE },
+        entryType: 'task',
+        isNativeTask: true,
+        completed: res.data.status === 'completed',
+        htmlLink: 'https://calendar.google.com',
+      };
+    } catch (err) {
+      logger.warn(`Google Tasks API insert failed (${err.message}). Falling back to Calendar event representation.`);
+    }
+  }
+
+  // 2. Standard Google Calendar Event (with 5-minute reminder override)
   const payload = {
     summary: cleanSummary,
     description: eventData.description || '',
@@ -118,6 +207,13 @@ export async function insertCalendarEvent(authClient, eventData) {
     end: {
       dateTime: eventData.end_time || eventData.end,
       timeZone: TIMEZONE,
+    },
+    // Reminders set to exactly 5 minutes as requested!
+    reminders: {
+      useDefault: false,
+      overrides: [
+        { method: 'popup', minutes: 5 },
+      ],
     },
     extendedProperties: {
       private: {
@@ -135,6 +231,8 @@ export async function insertCalendarEvent(authClient, eventData) {
     const newDemoEvent = {
       id: `demo-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       ...payload,
+      entryType: isTask ? 'task' : 'event',
+      completed: Boolean(eventData.completed),
       htmlLink: 'https://calendar.google.com',
     };
     mockCalendarEvents.push(newDemoEvent);
@@ -162,18 +260,20 @@ export async function batchInsertEvents(authClient, eventsList = []) {
 }
 
 /**
- * Toggles an item's completed status (for tasks)
+ * Toggles an item's completed status (handles native Google Tasks and Calendar events)
  */
 export async function toggleItemComplete(authClient, itemId, forceStatus) {
-  const calendar = getClient(authClient);
+  const calendar = getCalendarClient(authClient);
+  const tasksClient = getTasksClient(authClient);
 
   if (!calendar) {
     const item = mockCalendarEvents.find(e => e.id === itemId);
     if (!item) throw new Error('Item not found in demo calendar');
 
-    const currentCompleted = item.extendedProperties?.private?.completed === 'true';
+    const currentCompleted = item.completed === true || item.extendedProperties?.private?.completed === 'true';
     const nextStatus = forceStatus !== undefined ? forceStatus : !currentCompleted;
 
+    item.completed = nextStatus;
     if (!item.extendedProperties) item.extendedProperties = { private: {} };
     if (!item.extendedProperties.private) item.extendedProperties.private = {};
 
@@ -187,7 +287,38 @@ export async function toggleItemComplete(authClient, itemId, forceStatus) {
     };
   }
 
-  // Live Google Calendar
+  // 1. Try toggling via Google Tasks API first
+  if (tasksClient) {
+    try {
+      const currentTask = await tasksClient.tasks.get({
+        tasklist: '@default',
+        task: itemId,
+      });
+
+      const nextStatus = forceStatus !== undefined
+        ? (forceStatus ? 'completed' : 'needsAction')
+        : (currentTask.data.status === 'completed' ? 'needsAction' : 'completed');
+
+      const patchRes = await tasksClient.tasks.patch({
+        tasklist: '@default',
+        task: itemId,
+        requestBody: {
+          status: nextStatus,
+        },
+      });
+
+      return {
+        id: patchRes.data.id,
+        completed: patchRes.data.status === 'completed',
+        entryType: 'task',
+        isNativeTask: true,
+      };
+    } catch (e) {
+      // Not a native task, proceed to Calendar event patch
+    }
+  }
+
+  // 2. Toggle via Google Calendar event extended properties
   const existing = await calendar.events.get({
     calendarId: 'primary',
     eventId: itemId,
@@ -224,7 +355,7 @@ export async function toggleItemComplete(authClient, itemId, forceStatus) {
  * Updates an event
  */
 export async function updateCalendarEvent(authClient, eventId, eventData) {
-  const calendar = getClient(authClient);
+  const calendar = getCalendarClient(authClient);
 
   if (!calendar) {
     const idx = mockCalendarEvents.findIndex(e => e.id === eventId);
@@ -235,24 +366,47 @@ export async function updateCalendarEvent(authClient, eventId, eventData) {
     throw new Error('Event not found in demo calendar');
   }
 
+  // Enforce 5-minute reminder override on updates
+  const requestBody = {
+    ...eventData,
+    reminders: {
+      useDefault: false,
+      overrides: [{ method: 'popup', minutes: 5 }],
+    },
+  };
+
   const res = await calendar.events.patch({
     calendarId: 'primary',
     eventId,
-    requestBody: eventData,
+    requestBody,
   });
 
   return res.data;
 }
 
 /**
- * Deletes an event
+ * Deletes an event or task
  */
 export async function deleteCalendarEvent(authClient, eventId) {
-  const calendar = getClient(authClient);
+  const calendar = getCalendarClient(authClient);
+  const tasksClient = getTasksClient(authClient);
 
   if (!calendar) {
     mockCalendarEvents = mockCalendarEvents.filter(e => e.id !== eventId);
     return { success: true, id: eventId };
+  }
+
+  // Try deleting from Google Tasks first
+  if (tasksClient) {
+    try {
+      await tasksClient.tasks.delete({
+        tasklist: '@default',
+        task: eventId,
+      });
+      return { success: true, id: eventId, isNativeTask: true };
+    } catch (e) {
+      // Not a task, proceed to calendar event delete
+    }
   }
 
   await calendar.events.delete({
