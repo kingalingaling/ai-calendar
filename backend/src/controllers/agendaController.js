@@ -63,7 +63,24 @@ export async function toggleComplete(req, res, next) {
     const { id } = req.params;
     const { completed } = req.body;
     const result = await toggleItemComplete(req.authClient, id, completed);
-    res.json({ success: true, ...result });
+
+    let gamification = null;
+    if (completed) {
+      try {
+        const userId = req.user?.id || 'default_user';
+        const { recordTaskCompletion } = await import('../services/gamificationService.js');
+        gamification = recordTaskCompletion(userId, {
+          id,
+          title: 'Calendar Task',
+          estimated_minutes: 30,
+          priority: 'medium',
+        });
+      } catch (gErr) {
+        // Silently continue
+      }
+    }
+
+    res.json({ success: true, ...result, gamification });
   } catch (err) {
     next(err);
   }
