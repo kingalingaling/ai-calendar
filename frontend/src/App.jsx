@@ -9,7 +9,6 @@ import { ContextBar } from './components/contexts/ContextBar.jsx';
 import { CreateContextModal } from './components/contexts/CreateContextModal.jsx';
 import { TasksView } from './components/tasks/TasksView.jsx';
 import { WaitingForView } from './components/waiting/WaitingForView.jsx';
-import { SheetSyncModal } from './components/sheets/SheetSyncModal.jsx';
 import { GamificationBar } from './components/gamification/GamificationBar.jsx';
 import { GamificationModal } from './components/gamification/GamificationModal.jsx';
 import { AutoBlockModal } from './components/scheduling/AutoBlockModal.jsx';
@@ -40,7 +39,7 @@ export function App() {
   const [waitingTasks, setWaitingTasks] = useState([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [isContextModalOpen, setIsContextModalOpen] = useState(false);
-  const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
+  const [editingContext, setEditingContext] = useState(null);
 
   // Phase 3 & 4: Gamification & Auto-Blocking Modals
   const [gamificationProfile, setGamificationProfile] = useState(null);
@@ -328,12 +327,40 @@ export function App() {
   const handleCreateContext = async (contextData) => {
     try {
       const res = await api.post('/contexts', contextData);
-      showToast(`Context "${contextData.name}" created!`);
+      showToast(`Workspace "${contextData.name}" created!`);
       fetchContexts();
       return res.data;
     } catch (e) {
       console.error('Failed to create context:', e);
-      showToast('Failed to create context.');
+      showToast('Failed to create workspace.');
+      throw e;
+    }
+  };
+
+  const handleUpdateContext = async (id, contextData) => {
+    try {
+      const res = await api.patch(`/contexts/${id}`, contextData);
+      showToast(`Workspace updated to "${contextData.name}"!`);
+      fetchContexts();
+      fetchTasks();
+      return res.data;
+    } catch (e) {
+      console.error('Failed to update context:', e);
+      showToast('Failed to update workspace.');
+      throw e;
+    }
+  };
+
+  const handleDeleteContext = async (id) => {
+    try {
+      await api.delete(`/contexts/${id}`);
+      showToast('Workspace deleted.');
+      if (activeContextId === id) setActiveContextId(null);
+      fetchContexts();
+      fetchTasks();
+    } catch (e) {
+      console.error('Failed to delete context:', e);
+      showToast('Failed to delete workspace.');
       throw e;
     }
   };
@@ -483,7 +510,14 @@ export function App() {
               contexts={contexts}
               activeContextId={activeContextId}
               onSelectContext={setActiveContextId}
-              onOpenCreateContext={() => setIsContextModalOpen(true)}
+              onOpenCreateContext={() => {
+                setEditingContext(null);
+                setIsContextModalOpen(true);
+              }}
+              onOpenEditContext={(ctx) => {
+                setEditingContext(ctx);
+                setIsContextModalOpen(true);
+              }}
             />
 
             {/* Unified Tasks View */}
@@ -497,7 +531,6 @@ export function App() {
               onDeleteTask={handleDeleteTask}
               onCreateTask={handleCreateTask}
               onCreateProject={handleCreateProject}
-              onOpenSheetsSync={() => setIsSheetsModalOpen(true)}
               onOpenAutoBlock={() => setIsAutoBlockModalOpen(true)}
               isLoading={isLoadingTasks}
             />
@@ -565,27 +598,17 @@ export function App() {
         isCommitting={isCommitting}
       />
 
-      {/* Create Context Modal */}
+      {/* Create / Edit Context Modal */}
       <CreateContextModal
         isOpen={isContextModalOpen}
-        onClose={() => setIsContextModalOpen(false)}
-        onCreateContext={handleCreateContext}
-      />
-
-      {/* Google Sheets Ingestion Modal */}
-      <SheetSyncModal
-        isOpen={isSheetsModalOpen}
-        onClose={() => setIsSheetsModalOpen(false)}
-        contexts={contexts}
-        projects={projects}
-        activeContextId={activeContextId}
-        onSyncComplete={() => {
-          fetchTasks();
-          fetchWaitingTasks();
-          fetchContexts();
-          fetchGamification();
-          showToast('Tasks synchronized from Google Sheet!');
+        onClose={() => {
+          setIsContextModalOpen(false);
+          setEditingContext(null);
         }}
+        onCreateContext={handleCreateContext}
+        onUpdateContext={handleUpdateContext}
+        onDeleteContext={handleDeleteContext}
+        editingContext={editingContext}
       />
 
       {/* Gamification Modal (RPG Badges, Streaks, Energy & Themes) */}

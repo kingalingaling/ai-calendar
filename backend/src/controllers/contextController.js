@@ -1,34 +1,35 @@
 import * as contextService from '../services/contextService.js';
 
 function getUserId(req) {
-  return req.user?.id || 'default_user';
+  return req.user?.email || req.user?.id || 'default_user';
 }
 
-export function getContexts(req, res, next) {
+export async function getContexts(req, res, next) {
   try {
     const userId = getUserId(req);
-    const contexts = contextService.getContexts(userId);
+    const contexts = await contextService.getContexts(userId);
     res.json({ success: true, contexts });
   } catch (err) {
     next(err);
   }
 }
 
-export function createContext(req, res, next) {
+export async function createContext(req, res, next) {
   try {
     const userId = getUserId(req);
-    const { name, color, icon, workingHours, isDefault } = req.body;
+    const { name, color, icon, workingHours, isDefault, sortOrder } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Context name is required.' });
     }
 
-    const created = contextService.createContext(userId, {
+    const created = await contextService.createContext(userId, {
       name,
       color,
       icon,
       workingHours,
       isDefault,
+      sortOrder,
     });
 
     res.status(201).json({ success: true, context: created });
@@ -37,11 +38,11 @@ export function createContext(req, res, next) {
   }
 }
 
-export function updateContext(req, res, next) {
+export async function updateContext(req, res, next) {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const updated = contextService.updateContext(userId, id, req.body);
+    const updated = await contextService.updateContext(userId, id, req.body);
 
     if (!updated) {
       return res.status(404).json({ error: 'Context not found.' });
@@ -53,11 +54,11 @@ export function updateContext(req, res, next) {
   }
 }
 
-export function deleteContext(req, res, next) {
+export async function deleteContext(req, res, next) {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const success = contextService.deleteContext(userId, id);
+    const success = await contextService.deleteContext(userId, id);
 
     if (!success) {
       return res.status(404).json({ error: 'Context not found.' });

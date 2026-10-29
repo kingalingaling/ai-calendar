@@ -1,15 +1,15 @@
 import * as taskService from '../services/taskService.js';
 
 function getUserId(req) {
-  return req.user?.id || 'default_user';
+  return req.user?.email || req.user?.id || 'default_user';
 }
 
-export function getTasks(req, res, next) {
+export async function getTasks(req, res, next) {
   try {
     const userId = getUserId(req);
     const { contextId, projectId, status, excludeWaiting, waitingOnly, dueDate } = req.query;
 
-    const tasks = taskService.getTasks(userId, {
+    const tasks = await taskService.getTasks(userId, {
       contextId,
       projectId,
       status,
@@ -28,11 +28,11 @@ export function getTasks(req, res, next) {
   }
 }
 
-export function getTaskById(req, res, next) {
+export async function getTaskById(req, res, next) {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const task = taskService.getTaskById(userId, id);
+    const task = await taskService.getTaskById(userId, id);
 
     if (!task) {
       return res.status(404).json({ error: 'Task not found.' });
@@ -44,7 +44,7 @@ export function getTaskById(req, res, next) {
   }
 }
 
-export function createTask(req, res, next) {
+export async function createTask(req, res, next) {
   try {
     const userId = getUserId(req);
     const {
@@ -68,7 +68,7 @@ export function createTask(req, res, next) {
       return res.status(400).json({ error: 'contextId is required.' });
     }
 
-    const created = taskService.createTask(userId, {
+    const created = await taskService.createTask(userId, {
       contextId,
       projectId,
       title,
@@ -92,7 +92,7 @@ export async function updateTask(req, res, next) {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const updated = taskService.updateTask(userId, id, req.body);
+    const updated = await taskService.updateTask(userId, id, req.body);
 
     if (!updated) {
       return res.status(404).json({ error: 'Task not found.' });
@@ -102,7 +102,7 @@ export async function updateTask(req, res, next) {
     if (updated.status === 'done') {
       try {
         const { recordTaskCompletion } = await import('../services/gamificationService.js');
-        gamification = recordTaskCompletion(userId, updated);
+        gamification = await recordTaskCompletion(userId, updated);
       } catch (gErr) {
         // Log silently
       }
@@ -124,7 +124,7 @@ export async function setTaskStatus(req, res, next) {
       return res.status(400).json({ error: "Invalid status. Allowed values: 'todo', 'in_progress', 'waiting_for', 'done'." });
     }
 
-    const updated = taskService.setTaskStatus(userId, id, status, waitingReason);
+    const updated = await taskService.setTaskStatus(userId, id, status, waitingReason);
 
     if (!updated) {
       return res.status(404).json({ error: 'Task not found.' });
@@ -134,7 +134,7 @@ export async function setTaskStatus(req, res, next) {
     if (updated.status === 'done') {
       try {
         const { recordTaskCompletion } = await import('../services/gamificationService.js');
-        gamification = recordTaskCompletion(userId, updated);
+        gamification = await recordTaskCompletion(userId, updated);
       } catch (gErr) {
         // Log silently
       }
@@ -146,11 +146,11 @@ export async function setTaskStatus(req, res, next) {
   }
 }
 
-export function deleteTask(req, res, next) {
+export async function deleteTask(req, res, next) {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const success = taskService.deleteTask(userId, id);
+    const success = await taskService.deleteTask(userId, id);
 
     if (!success) {
       return res.status(404).json({ error: 'Task not found.' });

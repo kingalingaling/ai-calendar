@@ -150,7 +150,12 @@ CORE CAPABILITIES & RULES:
    - NEVER overlap with any existing commitment.
    - Output all timestamps with explicit '+01:00' timezone offset.
 
-5. YOU MUST CALL the 'schedule_events' function.
+5. CRITICAL: NO PAST SCHEDULING (NO PAST ADDITIONS):
+   - Current exact local time is: ${DateTime.now().setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm:ss')} WAT.
+   - Tasks being added MUST NEVER show up on the calendar before the time of addition!
+   - If targetDate is today (${DateTime.now().setZone(TIMEZONE).toFormat('yyyy-MM-dd')}), every start_time MUST be strictly at or after ${DateTime.now().setZone(TIMEZONE).toISO()}. Never schedule any task earlier today.
+
+6. YOU MUST CALL the 'schedule_events' function.
 `;
 
     const interaction = await aiClient.interactions.create({

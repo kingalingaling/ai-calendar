@@ -69,7 +69,15 @@ export function calculateFreeIntervals(dateStr, existingEvents = [], workingHour
     .filter(r => r.end > dayStart && r.start < dayEnd)
     .sort((a, b) => a.start.toMillis() - b.start.toMillis());
 
+  const todayStr = DateTime.now().setZone(TIMEZONE).toFormat('yyyy-MM-dd');
   let cursor = dayStart;
+  // Tasks being added should never show up before the time of addition
+  if (dateStr === todayStr) {
+    const now = DateTime.now().setZone(TIMEZONE);
+    if (now > cursor) {
+      cursor = now;
+    }
+  }
   const freeIntervals = [];
 
   for (const busy of busyRanges) {

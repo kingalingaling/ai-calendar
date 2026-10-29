@@ -1,5 +1,5 @@
 import React from 'react';
-import { Briefcase, Laptop, Sparkles, User, Layers, Plus } from 'lucide-react';
+import { Briefcase, Laptop, Sparkles, User, Layers, Plus, Edit2 } from 'lucide-react';
 
 const ICON_MAP = {
   briefcase: Briefcase,
@@ -14,6 +14,7 @@ export function ContextBar({
   activeContextId,
   onSelectContext,
   onOpenCreateContext,
+  onOpenEditContext,
 }) {
   return (
     <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
@@ -36,10 +37,9 @@ export function ContextBar({
         const isSelected = activeContextId === ctx.id;
 
         return (
-          <button
+          <div
             key={ctx.id}
-            onClick={() => onSelectContext(ctx.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 whitespace-nowrap transition-all border cursor-pointer ${
+            className={`flex items-center rounded-xl text-xs font-medium transition-all border ${
               isSelected
                 ? 'text-white border-opacity-70 shadow-md'
                 : 'bg-neutral-900/60 border-neutral-800/80 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-850'
@@ -50,25 +50,43 @@ export function ContextBar({
               color: isSelected ? '#ffffff' : undefined,
             }}
           >
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: ctx.color }}
-            />
-            <Icon className="w-3.5 h-3.5" style={{ color: ctx.color }} />
-            <span>{ctx.name}</span>
-
-            {ctx.activeTaskCount > 0 && (
+            <button
+              onClick={() => onSelectContext(ctx.id)}
+              className="px-3 py-1.5 flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            >
               <span
-                className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-semibold"
-                style={{
-                  backgroundColor: `${ctx.color}33`,
-                  color: ctx.color,
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: ctx.color }}
+              />
+              <Icon className="w-3.5 h-3.5" style={{ color: ctx.color }} />
+              <span>{ctx.name}</span>
+
+              {ctx.activeTaskCount > 0 && (
+                <span
+                  className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-semibold"
+                  style={{
+                    backgroundColor: `${ctx.color}33`,
+                    color: ctx.color,
+                  }}
+                >
+                  {ctx.activeTaskCount}
+                </span>
+              )}
+            </button>
+
+            {isSelected && onOpenEditContext && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenEditContext(ctx);
                 }}
+                className="pr-2 pl-0.5 py-1 text-neutral-400 hover:text-white cursor-pointer transition-colors"
+                title={`Rename or edit "${ctx.name}"`}
               >
-                {ctx.activeTaskCount}
-              </span>
+                <Edit2 className="w-3 h-3" />
+              </button>
             )}
-          </button>
+          </div>
         );
       })}
 
@@ -76,7 +94,7 @@ export function ContextBar({
       {onOpenCreateContext && (
         <button
           onClick={onOpenCreateContext}
-          className="p-1.5 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors shrink-0"
+          className="p-1.5 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors shrink-0 cursor-pointer"
           title="Add New Context/Workspace"
         >
           <Plus className="w-4 h-4" />

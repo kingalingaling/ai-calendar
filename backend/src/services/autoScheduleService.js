@@ -151,8 +151,31 @@ export async function planAutoSchedule({
       const windowStart = dayDate.set({ hour: startH, minute: startM, second: 0, millisecond: 0 });
       const windowEnd = dayDate.set({ hour: endH, minute: endM, second: 0, millisecond: 0 });
 
-      // Find free gap inside context window
-      let candidateStart = windowStart;
+      // CRITICAL GUARDRAIL: Tasks being added must never show up before the time of addition
+      // When scheduling for today, earliest start is rounded up to next 5-minute mark from current time
+      const currentNowWAT = nowWAT();
+      const currentTodayStr = currentNowWAT.toFormat('yyyy-MM-dd');
+      let earliestStartTime = windowStart;
+
+      if (dayDateStr === currentTodayStr) {
+        const rem = currentNowWAT.minute % 5;
+        const roundedNow = rem === 0 
+          ? currentNowWAT 
+          : currentNowWAT.plus({ minutes: 5 - rem }).set({ second: 0, millisecond: 0 });
+
+        if (roundedNow > earliestStartTime) {
+          earliestStartTime = roundedNow;
+          guardrailsApplied.push({
+            taskId: task.id,
+            taskTitle: task.title,
+            type: 'NO_PAST_ADDITION_GUARD',
+            message: `Prevented past scheduling: task will not appear before addition time (${roundedNow.toFormat('HH:mm')}).`,
+          });
+        }
+      }
+
+      // Find free gap inside context window starting from earliest allowed time
+      let candidateStart = earliestStartTime;
 
       while (candidateStart.plus({ minutes: durationMins }) <= windowEnd) {
         const candidateEnd = candidateStart.plus({ minutes: durationMins });
@@ -301,24 +324,42 @@ export async function commitAutoScheduledTasks({
       logger.error(`Failed to push task "${item.title}" to Google Calendar:`, err);
     }
 
-    // 2. Update SQLite Task
+    // 2. Update Task in MongoDB and SQLite
     if (item.taskId) {
-      db.prepare(`
-        UPDATE tasks
-        SET scheduled_start = ?,
-            scheduled_end = ?,
-            calendar_event_id = ?,
-            status = CASE WHEN status = 'todo' THEN 'in_progress' ELSE status END,
-            updated_at = ?
-        WHERE id = ? AND user_id = ?
-      `).run(
-        item.start,
-        item.end,
-        calendarResult?.id || null,
-        now,
-        item.taskId,
-        userId
-      );
+      try {
+        const { isMongoConnected } = await import('../db/mongodb.js');
+        if (isMongoConnected()) {
+          const { Task } = await import('../models/Task.js');
+          await Task.findByIdAndUpdate(item.taskId, {
+            $set: {
+              scheduledStart: item.start,
+              scheduledEnd: item.end,
+              calendarEventId: calendarResult?.id || null,
+              status: 'in_progress',
+            },
+          });
+        }
+      } catch (mErr) {
+        // Fallback to SQLite update
+      }
+
+      try {
+        db.prepare(`
+          UPDATE tasks
+          SET scheduled_start = ?,
+              scheduled_end = ?,
+              calendar_event_id = ?,
+              status = CASE WHEN status = 'todo' THEN 'in_progress' ELSE status END,
+              updated_at = ?
+          WHERE id = ?
+        `).run(
+          item.start,
+          item.end,
+          calendarResult?.id || null,
+          now,
+          item.taskId
+        );
+      } catch {}
     }
 
     results.push({

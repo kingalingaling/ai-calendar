@@ -12,7 +12,7 @@ const testUser = `test_user_${Date.now()}`;
 initSchema();
 seedDefaultContextsIfEmpty(testUser);
 
-const contexts = contextService.getContexts(testUser);
+const contexts = await contextService.getContexts(testUser);
 console.assert(contexts.length >= 4, 'Should have at least 4 default contexts');
 console.log('✅ Contexts seeded successfully:', contexts.map(c => c.name).join(', '));
 
@@ -40,7 +40,7 @@ console.assert(projectsTree[0].subProjects.length === 1, 'Root project should ha
 console.log('✅ Project hierarchy & milestones created successfully.');
 
 // 3. Create Tasks (including Waiting For status)
-const normalTask = taskService.createTask(testUser, {
+const normalTask = await taskService.createTask(testUser, {
   contextId: jobA.id,
   projectId: subMilestone.id,
   title: 'Draft wireframe layout',
@@ -48,7 +48,7 @@ const normalTask = taskService.createTask(testUser, {
   status: 'todo',
 });
 
-const waitingTask = taskService.createTask(testUser, {
+const waitingTask = await taskService.createTask(testUser, {
   contextId: jobA.id,
   projectId: subMilestone.id,
   title: 'Submit design for Boss approval',
@@ -57,11 +57,11 @@ const waitingTask = taskService.createTask(testUser, {
 });
 
 // Test filtering: excludeWaiting should filter out the blocked task!
-const activeTasks = taskService.getTasks(testUser, { contextId: jobA.id, excludeWaiting: true });
+const activeTasks = await taskService.getTasks(testUser, { contextId: jobA.id, excludeWaiting: true });
 console.assert(activeTasks.length === 1, 'Active tasks with excludeWaiting should have 1 task');
 console.assert(activeTasks[0].id === normalTask.id, 'Active task should be normal task');
 
-const waitingTasks = taskService.getTasks(testUser, { contextId: jobA.id, waitingOnly: true });
+const waitingTasks = await taskService.getTasks(testUser, { contextId: jobA.id, waitingOnly: true });
 console.assert(waitingTasks.length === 1, 'Waiting tasks should have 1 task');
 console.assert(waitingTasks[0].waitingReason.includes('boss review'), 'Waiting reason should match');
 console.log('✅ Task creation & "Waiting For" filtering verified successfully.');

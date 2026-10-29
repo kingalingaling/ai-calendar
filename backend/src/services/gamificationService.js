@@ -1,3 +1,7 @@
+import { isMongoConnected } from '../db/mongodb.js';
+import { Gamification } from '../models/Gamification.js';
+import { XpLog } from '../models/XpLog.js';
+import { Task } from '../models/Task.js';
 import { db } from '../db/database.js';
 import { randomUUID } from 'crypto';
 import { DateTime } from 'luxon';
@@ -41,12 +45,6 @@ export const BADGE_DEFINITIONS = {
     icon: 'Layers',
     description: 'Completed tasks across multiple distinct workspaces in one day.',
   },
-  sheet_wizard: {
-    id: 'sheet_wizard',
-    name: 'Spreadsheet Ingestor',
-    icon: 'FileSpreadsheet',
-    description: 'Completed a task synchronized directly from a Google Sheet.',
-  },
 };
 
 export const LEVEL_THRESHOLDS = [
@@ -89,9 +87,61 @@ export function calculateLevelFromXp(xp = 0) {
 }
 
 /**
- * Retrieves or initializes gamification profile for user
+ * Retrieves or initializes gamification profile for user.
+ * In MongoDB, profiles are synced across all devices connected to the same database.
  */
-export function getOrCreateUserGamification(userId = 'default_user') {
+export async function getOrCreateUserGamification(userId = 'default_user') {
+  if (isMongoConnected()) {
+    try {
+      // Find profile by userId or fallback to global_user so all devices share the XP
+      let doc = await Gamification.findOne({ userId });
+      if (!doc && userId !== 'global_user') {
+        doc = await Gamification.findOne({ userId: 'global_user' });
+      }
+
+      if (!doc) {
+        doc = await Gamification.create({
+          userId: userId || 'global_user',
+          xp: 0,
+          level: 1,
+          streakCount: 0,
+          bestStreak: 0,
+          lastActiveDate: null,
+          streakFreezesAvailable: 2,
+          unlockedBadges: [],
+          currentTheme: 'emerald',
+          dailyStaminaMax: 100,
+        });
+      }
+
+      const levelInfo = calculateLevelFromXp(doc.xp);
+      const badges = (doc.unlockedBadges || []).map(bId => BADGE_DEFINITIONS[bId] || { id: bId, name: bId });
+      const unlockedThemes = LEVEL_THRESHOLDS
+        .filter(t => t.level <= levelInfo.level)
+        .map(t => t.theme);
+
+      return {
+        userId: doc.userId,
+        xp: doc.xp,
+        level: levelInfo.level,
+        levelTitle: levelInfo.title,
+        levelProgressPercent: levelInfo.progressPercent,
+        xpForNextLevel: levelInfo.xpForNextLevel,
+        streakCount: doc.streakCount,
+        bestStreak: doc.bestStreak,
+        lastActiveDate: doc.lastActiveDate,
+        streakFreezesAvailable: doc.streakFreezesAvailable,
+        unlockedBadges: badges,
+        currentTheme: doc.currentTheme,
+        unlockedThemes,
+        dailyStaminaMax: doc.dailyStaminaMax || 100,
+      };
+    } catch (err) {
+      logger.warn('Failed to fetch gamification from MongoDB, falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite Fallback
   let row = db.prepare('SELECT * FROM user_gamification WHERE user_id = ?').get(userId);
 
   if (!row) {
@@ -110,7 +160,6 @@ export function getOrCreateUserGamification(userId = 'default_user') {
   const levelInfo = calculateLevelFromXp(row.xp);
   const badges = JSON.parse(row.unlocked_badges || '[]').map((bId) => BADGE_DEFINITIONS[bId] || { id: bId, name: bId });
 
-  // Unlocked themes based on user level
   const unlockedThemes = LEVEL_THRESHOLDS
     .filter((t) => t.level <= levelInfo.level)
     .map((t) => t.theme);
@@ -135,27 +184,42 @@ export function getOrCreateUserGamification(userId = 'default_user') {
 
 /**
  * Calculates current day's stamina/energy consumption
- * Stamina limit is 100 daily points. Tasks and meetings consume stamina based on cognitive load.
  */
-export function calculateDailyStamina(userId = 'default_user', dateStr = null, existingEvents = []) {
+export async function calculateDailyStamina(userId = 'default_user', dateStr = null, existingEvents = []) {
   const targetDate = dateStr || DateTime.now().setZone(TIMEZONE).toFormat('yyyy-MM-dd');
 
-  // Query scheduled/completed tasks for this date
-  const tasksForDay = db.prepare(`
-    SELECT * FROM tasks
-    WHERE user_id = ?
-      AND (
-        due_date = ?
-        OR scheduled_start LIKE ?
-        OR (completed_at LIKE ? AND status = 'done')
-      )
-  `).all(userId, targetDate, `${targetDate}%`, `${targetDate}%`);
+  let tasksForDay = [];
+
+  if (isMongoConnected()) {
+    try {
+      tasksForDay = await Task.find({
+        $or: [
+          { dueDate: targetDate },
+          { scheduledStart: new RegExp(`^${targetDate}`) },
+          { completedAt: { $gte: new Date(targetDate), $lt: new Date(DateTime.fromISO(targetDate).plus({ days: 1 }).toISODate()) } },
+        ],
+      }).lean();
+    } catch {
+      // Fallback to SQLite
+    }
+  }
+
+  if (tasksForDay.length === 0) {
+    tasksForDay = db.prepare(`
+      SELECT * FROM tasks
+      WHERE user_id = ?
+        AND (
+          due_date = ?
+          OR scheduled_start LIKE ?
+          OR (completed_at LIKE ? AND status = 'done')
+        )
+    `).all(userId, targetDate, `${targetDate}%`, `${targetDate}%`);
+  }
 
   let staminaUsed = 0;
 
-  // Calculate task stamina drain
   for (const t of tasksForDay) {
-    const mins = t.estimated_minutes || 30;
+    const mins = t.estimated_minutes || t.estimatedMinutes || 30;
     let cost = 10;
     if (mins > 60) cost = 35;
     else if (mins > 30) cost = 20;
@@ -166,7 +230,6 @@ export function calculateDailyStamina(userId = 'default_user', dateStr = null, e
     staminaUsed += cost;
   }
 
-  // Calculate calendar events stamina drain (meetings & calls)
   if (Array.isArray(existingEvents)) {
     for (const ev of existingEvents) {
       const start = ev.start?.dateTime;
@@ -202,143 +265,127 @@ export function calculateDailyStamina(userId = 'default_user', dateStr = null, e
 }
 
 /**
- * Awards XP and updates streaks & badges upon task completion
+ * Awards XP and updates streaks & badges upon task completion.
+ * Syncs directly to MongoDB when connected, making XP consistent across all devices!
  */
-export function recordTaskCompletion(userId = 'default_user', task) {
-  const profile = getOrCreateUserGamification(userId);
+export async function recordTaskCompletion(userId = 'default_user', task) {
+  const profile = await getOrCreateUserGamification(userId);
   const nowWAT = DateTime.now().setZone(TIMEZONE);
   const todayStr = nowWAT.toFormat('yyyy-MM-dd');
   const yesterdayStr = nowWAT.minus({ days: 1 }).toFormat('yyyy-MM-dd');
 
   // 1. Calculate XP earned
-  const mins = task.estimated_minutes || 30;
-  let xpEarned = Math.max(15, mins); // Base: 1 XP per minute, min 15 XP
+  const mins = task.estimated_minutes || task.estimatedMinutes || 30;
+  let xpEarned = Math.max(15, mins);
 
   if (task.priority === 'urgent') xpEarned += 25;
   else if (task.priority === 'high') xpEarned += 15;
   else if (task.priority === 'medium') xpEarned += 5;
 
-  if (mins >= 60) xpEarned += 20; // Deep work bonus
+  if (mins >= 60) xpEarned += 20;
 
-  // Streak bonus multiplier
   if (profile.streakCount >= 7) xpEarned = Math.round(xpEarned * 1.25);
   else if (profile.streakCount >= 3) xpEarned = Math.round(xpEarned * 1.1);
 
-  // 2. Handle Streaks and Freezes
+  // 2. Streaks and Freezes
   let newStreak = profile.streakCount;
   let newBestStreak = profile.bestStreak;
   let freezesAvailable = profile.streakFreezesAvailable;
   let freezeUsed = false;
 
   if (profile.lastActiveDate === todayStr) {
-    // Already logged activity today, streak remains current
+    // Already active today
   } else if (profile.lastActiveDate === yesterdayStr || !profile.lastActiveDate) {
-    // Consecutive day activity!
     newStreak = (profile.streakCount || 0) + 1;
     if (newStreak > newBestStreak) newBestStreak = newStreak;
   } else {
-    // Missed at least one day
     const lastActive = DateTime.fromISO(profile.lastActiveDate, { zone: TIMEZONE });
     const daysMissed = Math.floor(nowWAT.diff(lastActive, 'days').days);
 
     if (daysMissed === 2 && freezesAvailable > 0) {
-      // Grace period with streak freeze!
       freezesAvailable -= 1;
       freezeUsed = true;
       newStreak = (profile.streakCount || 0) + 1;
       if (newStreak > newBestStreak) newBestStreak = newStreak;
-      logger.info(`❄️ Streak freeze consumed for user ${userId}! Streak preserved at ${newStreak}.`);
+      logger.info(`❄️ Streak freeze consumed for ${userId}! Streak preserved at ${newStreak}.`);
     } else {
-      // Streak broken, reset to 1
       newStreak = 1;
     }
   }
 
-  // 3. Check for Badge Unlocks
-  const currentBadges = JSON.parse(
-    db.prepare('SELECT unlocked_badges FROM user_gamification WHERE user_id = ?').get(userId)?.unlocked_badges || '[]'
-  );
+  // 3. Badges Check
+  const currentBadgeIds = (profile.unlockedBadges || []).map(b => (typeof b === 'string' ? b : b.id));
   const newlyUnlockedBadges = [];
 
   const tryAwardBadge = (badgeId) => {
-    if (!currentBadges.includes(badgeId)) {
-      currentBadges.push(badgeId);
+    if (!currentBadgeIds.includes(badgeId)) {
+      currentBadgeIds.push(badgeId);
       newlyUnlockedBadges.push(BADGE_DEFINITIONS[badgeId] || { id: badgeId });
     }
   };
 
-  // Badge 1: First Quest
   tryAwardBadge('novice_adventurer');
-
-  // Badge 2: Deep Work
-  if (mins >= 60) {
-    tryAwardBadge('deep_work_focus');
-  }
-
-  // Badge 3 & 4: Streaks
+  if (mins >= 60) tryAwardBadge('deep_work_focus');
   if (newStreak >= 3) tryAwardBadge('streak_cadet');
   if (newStreak >= 7) tryAwardBadge('streak_veteran');
   if (newStreak >= 14) tryAwardBadge('streak_legend');
 
-  // Badge 5: Google Sheets Task
-  if (task.source === 'google_sheets') {
-    tryAwardBadge('sheet_wizard');
-  }
-
-  // Badge 6: Multi-Context
-  const distinctContexts = db.prepare(`
-    SELECT COUNT(DISTINCT context_id) as count
-    FROM tasks
-    WHERE user_id = ? AND status = 'done' AND completed_at LIKE ?
-  `).get(userId, `${todayStr}%`);
-
-  if (distinctContexts && distinctContexts.count >= 2) {
-    tryAwardBadge('context_master');
-  }
-
-  // 4. Update Database
   const newTotalXp = profile.xp + xpEarned;
   const oldLevel = profile.level;
   const levelInfo = calculateLevelFromXp(newTotalXp);
   const levelUp = levelInfo.level > oldLevel;
   const now = new Date().toISOString();
 
-  db.prepare(`
-    UPDATE user_gamification
-    SET xp = ?,
-        level = ?,
-        streak_count = ?,
-        best_streak = ?,
-        last_active_date = ?,
-        streak_freezes_available = ?,
-        unlocked_badges = ?,
-        updated_at = ?
-    WHERE user_id = ?
-  `).run(
-    newTotalXp,
-    levelInfo.level,
-    newStreak,
-    newBestStreak,
-    todayStr,
-    freezesAvailable,
-    JSON.stringify(currentBadges),
-    now,
-    userId
-  );
+  // 4. Update MongoDB if connected
+  if (isMongoConnected()) {
+    try {
+      await Gamification.findOneAndUpdate(
+        { userId: profile.userId },
+        {
+          $set: {
+            xp: newTotalXp,
+            level: levelInfo.level,
+            streakCount: newStreak,
+            bestStreak: newBestStreak,
+            lastActiveDate: todayStr,
+            streakFreezesAvailable: freezesAvailable,
+            unlockedBadges: currentBadgeIds,
+          },
+        },
+        { upsert: true }
+      );
 
-  // Log XP transaction
-  const logId = `xp-${randomUUID()}`;
-  db.prepare(`
-    INSERT INTO xp_logs (id, user_id, task_id, amount, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    logId,
-    userId,
-    task.id,
-    xpEarned,
-    `Completed task: ${task.title}`,
-    now
-  );
+      await XpLog.create({
+        userId: profile.userId,
+        taskId: task.id || null,
+        amount: xpEarned,
+        reason: `Completed task: ${task.title || 'Untitled Task'}`,
+      });
+    } catch (err) {
+      logger.warn('Failed to update gamification in MongoDB:', err.message);
+    }
+  }
+
+  // Also update SQLite fallback
+  try {
+    db.prepare(`
+      UPDATE user_gamification
+      SET xp = ?, level = ?, streak_count = ?, best_streak = ?,
+          last_active_date = ?, streak_freezes_available = ?,
+          unlocked_badges = ?, updated_at = ?
+      WHERE user_id = ?
+    `).run(
+      newTotalXp,
+      levelInfo.level,
+      newStreak,
+      newBestStreak,
+      todayStr,
+      freezesAvailable,
+      JSON.stringify(currentBadgeIds),
+      now,
+      userId
+    );
+  } catch {}
 
   return {
     xpEarned,
@@ -353,18 +400,25 @@ export function recordTaskCompletion(userId = 'default_user', task) {
   };
 }
 
-/**
- * Allows user to switch their active unlock theme
- */
-export function setUserTheme(userId = 'default_user', theme = 'emerald') {
-  const profile = getOrCreateUserGamification(userId);
+export async function setUserTheme(userId = 'default_user', theme = 'emerald') {
+  const profile = await getOrCreateUserGamification(userId);
   if (!profile.unlockedThemes.includes(theme)) {
     throw new Error(`Theme "${theme}" is locked. Level up to unlock it!`);
   }
 
-  db.prepare(`
-    UPDATE user_gamification SET current_theme = ?, updated_at = ? WHERE user_id = ?
-  `).run(theme, new Date().toISOString(), userId);
+  if (isMongoConnected()) {
+    try {
+      await Gamification.findOneAndUpdate(
+        { userId: profile.userId },
+        { $set: { currentTheme: theme } }
+      );
+    } catch {}
+  }
+
+  try {
+    db.prepare('UPDATE user_gamification SET current_theme = ?, updated_at = ? WHERE user_id = ?')
+      .run(theme, new Date().toISOString(), userId);
+  } catch {}
 
   return { success: true, theme };
 }
