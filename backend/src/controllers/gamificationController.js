@@ -3,7 +3,7 @@ import { listCalendarEvents } from '../services/calendarService.js';
 import { getDayBoundsWAT } from '../config/timezone.js';
 
 function getUserId(req) {
-  return req.user?.id || 'default_user';
+  return req.user?.email || req.user?.id || 'default_user';
 }
 
 export async function getGamificationStats(req, res, next) {
@@ -11,7 +11,7 @@ export async function getGamificationStats(req, res, next) {
     const userId = getUserId(req);
     const { date } = req.query;
 
-    const profile = gamificationService.getOrCreateUserGamification(userId);
+    const profile = await gamificationService.getOrCreateUserGamification(userId);
 
     // Fetch calendar events to calculate today's stamina
     let events = [];
@@ -22,7 +22,7 @@ export async function getGamificationStats(req, res, next) {
       // If calendar fetch fails, proceed with empty events
     }
 
-    const stamina = gamificationService.calculateDailyStamina(userId, date, events);
+    const stamina = await gamificationService.calculateDailyStamina(userId, date, events);
 
     res.json({
       success: true,
@@ -34,7 +34,7 @@ export async function getGamificationStats(req, res, next) {
   }
 }
 
-export function switchTheme(req, res, next) {
+export async function switchTheme(req, res, next) {
   try {
     const userId = getUserId(req);
     const { theme } = req.body;
@@ -43,7 +43,7 @@ export function switchTheme(req, res, next) {
       return res.status(400).json({ error: 'Theme is required.' });
     }
 
-    const result = gamificationService.setUserTheme(userId, theme);
+    const result = await gamificationService.setUserTheme(userId, theme);
     res.json({ success: true, ...result });
   } catch (err) {
     next(err);

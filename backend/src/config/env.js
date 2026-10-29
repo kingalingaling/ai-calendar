@@ -14,6 +14,7 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional().default(''),
   GOOGLE_REDIRECT_URI: z.string().default('http://localhost:5000/api/auth/google/callback'),
   DEFAULT_TIMEZONE: z.string().default('Africa/Lagos'),
+  MONGODB_URI: z.string().optional().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

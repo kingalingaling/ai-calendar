@@ -13,7 +13,7 @@ initSchema();
 const testUser = `test_hero_${Date.now()}`;
 seedDefaultContextsIfEmpty(testUser);
 
-const contexts = contextService.getContexts(testUser);
+const contexts = await contextService.getContexts(testUser);
 const jobA = contexts.find(c => c.name === 'Job A');
 const jobB = contexts.find(c => c.name === 'Job B');
 
@@ -22,7 +22,7 @@ assert.ok(jobB, 'Job B context should exist');
 
 // 1. Test Gamification: Profile Initialization
 console.log('1️⃣ Testing Gamification Profile & XP System...');
-const initialProfile = gamificationService.getOrCreateUserGamification(testUser);
+const initialProfile = await gamificationService.getOrCreateUserGamification(testUser);
 assert.strictEqual(initialProfile.level, 1, 'Initial level should be 1');
 assert.strictEqual(initialProfile.xp, 0, 'Initial XP should be 0');
 assert.strictEqual(initialProfile.streakFreezesAvailable, 2, 'Should start with 2 streak freezes');
@@ -36,7 +36,7 @@ const dummyTask1 = {
   source: 'manual',
 };
 
-const xpResult1 = gamificationService.recordTaskCompletion(testUser, dummyTask1);
+const xpResult1 = await gamificationService.recordTaskCompletion(testUser, dummyTask1);
 assert.ok(xpResult1.xpEarned >= 60, 'XP earned should be >= 60 for 60-min high priority task');
 assert.strictEqual(xpResult1.streakCount, 1, 'Streak should increment to 1');
 assert.ok(
@@ -50,28 +50,28 @@ assert.ok(
 console.log(`✅ Awarded ${xpResult1.xpEarned} XP! Badges unlocked: ${xpResult1.newlyUnlockedBadges.map(b => b.name).join(', ')}`);
 
 // 3. Test Gamification: Daily Stamina Calculation
-const stamina = gamificationService.calculateDailyStamina(testUser);
+const stamina = await gamificationService.calculateDailyStamina(testUser);
 assert.strictEqual(stamina.maxStamina, 100, 'Max stamina should be 100');
 assert.ok(stamina.staminaRemaining <= 100, 'Remaining stamina should be <= 100');
 console.log(`✅ Daily Stamina: ${stamina.staminaUsed}/100 used (${stamina.staminaRemaining} remaining, Burnout Risk: ${stamina.burnoutRisk})`);
 
 // 4. Test Phase 3: Create Tasks for Job A and Job B
 console.log('2️⃣ Testing Intelligent Time Blocking with Context Hours & Buffers...');
-const taskJobA1 = taskService.createTask(testUser, {
+const taskJobA1 = await taskService.createTask(testUser, {
   contextId: jobA.id,
   title: 'Job A Deep Architecture',
   estimatedMinutes: 60,
   priority: 'urgent',
 });
 
-const taskJobA2 = taskService.createTask(testUser, {
+const taskJobA2 = await taskService.createTask(testUser, {
   contextId: jobA.id,
   title: 'Job A Client Brief',
   estimatedMinutes: 45,
   priority: 'high',
 });
 
-const taskJobB1 = taskService.createTask(testUser, {
+const taskJobB1 = await taskService.createTask(testUser, {
   contextId: jobB.id,
   title: 'Job B Code Review',
   estimatedMinutes: 45,
@@ -141,7 +141,7 @@ assert.strictEqual(commitResult.success, true, 'Commit should succeed');
 assert.strictEqual(commitResult.count, allScheduledItems.length, 'All tasks should be committed');
 
 // Check that SQLite task records were updated with scheduled_start and scheduled_end
-const updatedTask = taskService.getTaskById(testUser, taskJobA1.id);
+const updatedTask = await taskService.getTaskById(testUser, taskJobA1.id);
 assert.ok(updatedTask.scheduledStart, 'Task should have scheduledStart populated');
 assert.ok(updatedTask.scheduledEnd, 'Task should have scheduledEnd populated');
 

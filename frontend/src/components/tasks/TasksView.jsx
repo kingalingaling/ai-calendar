@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Plus, CheckCircle2, Circle, AlertCircle, Clock, Trash2, Folder,
-  ChevronDown, ChevronRight, FileSpreadsheet, Hourglass, Sparkles
+  ChevronDown, ChevronRight, Hourglass, Sparkles
 } from 'lucide-react';
 
 export function TasksView({
@@ -14,7 +14,6 @@ export function TasksView({
   onDeleteTask,
   onCreateTask,
   onCreateProject,
-  onOpenSheetsSync,
   onOpenAutoBlock,
   isLoading,
 }) {
@@ -59,7 +58,7 @@ export function TasksView({
 
   return (
     <div className="space-y-4">
-      {/* Top Controls: Add Task, Auto-Block & Google Sheets Ingestion */}
+      {/* Top Controls: Add Task & Auto-Block */}
       <div className="flex items-center justify-between gap-2">
         <button
           onClick={() => {
@@ -80,17 +79,6 @@ export function TasksView({
           >
             <Sparkles className="w-4 h-4 text-emerald-400" />
             <span>Auto-Block</span>
-          </button>
-        )}
-
-        {onOpenSheetsSync && (
-          <button
-            onClick={onOpenSheetsSync}
-            className="flex items-center gap-1.5 py-2 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border border-neutral-800 text-xs font-medium transition-colors cursor-pointer"
-            title="Import tasks from a view-only Google Sheet"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>Sheets</span>
           </button>
         )}
       </div>

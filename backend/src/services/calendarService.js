@@ -13,7 +13,7 @@ let mockCalendarEvents = [
     colorId: '1',
     htmlLink: 'https://calendar.google.com',
     entryType: 'event',
-    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }] },
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }, { method: 'popup', minutes: 0 }] },
     extendedProperties: {
       private: {
         entryType: 'event',
@@ -50,7 +50,7 @@ let mockCalendarEvents = [
     colorId: '5',
     htmlLink: 'https://calendar.google.com',
     entryType: 'event',
-    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }] },
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 5 }, { method: 'popup', minutes: 0 }] },
     extendedProperties: {
       private: {
         entryType: 'event',
@@ -208,11 +208,12 @@ export async function insertCalendarEvent(authClient, eventData) {
       dateTime: eventData.end_time || eventData.end,
       timeZone: TIMEZONE,
     },
-    // Reminders set to exactly 5 minutes as requested!
+    // Reminders set to 5 minutes to (5) and at the time of the task (0)
     reminders: {
       useDefault: false,
       overrides: [
         { method: 'popup', minutes: 5 },
+        { method: 'popup', minutes: 0 },
       ],
     },
     extendedProperties: {
@@ -366,12 +367,15 @@ export async function updateCalendarEvent(authClient, eventId, eventData) {
     throw new Error('Event not found in demo calendar');
   }
 
-  // Enforce 5-minute reminder override on updates
+  // Enforce 5-minute before and at-time reminder overrides on updates
   const requestBody = {
     ...eventData,
     reminders: {
       useDefault: false,
-      overrides: [{ method: 'popup', minutes: 5 }],
+      overrides: [
+        { method: 'popup', minutes: 5 },
+        { method: 'popup', minutes: 0 },
+      ],
     },
   };
 

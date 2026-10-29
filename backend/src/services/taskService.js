@@ -1,7 +1,65 @@
+import { isMongoConnected } from '../db/mongodb.js';
+import { Task } from '../models/Task.js';
+import { Context } from '../models/Context.js';
 import { db } from '../db/database.js';
 import { randomUUID } from 'crypto';
+import { logger } from '../utils/logger.js';
 
-export function getTasks(userId, filters = {}) {
+export async function getTasks(userId = 'default_user', filters = {}) {
+  if (isMongoConnected()) {
+    try {
+      const query = {};
+      if (filters.contextId) query.contextId = filters.contextId;
+      if (filters.projectId) query.projectId = filters.projectId;
+      if (filters.status) query.status = filters.status;
+      if (filters.excludeWaiting) query.status = { $ne: 'waiting_for' };
+      if (filters.waitingOnly) query.status = 'waiting_for';
+      if (filters.dueDate) query.dueDate = filters.dueDate;
+
+      const docs = await Task.find(query).sort({ createdAt: -1 }).lean();
+      const contexts = await Context.find().lean();
+      const contextMap = {};
+      contexts.forEach(c => {
+        contextMap[c._id.toString()] = c;
+      });
+
+      return docs.map(doc => {
+        const ctx = contextMap[doc.contextId] || {};
+        return {
+          id: doc._id.toString(),
+          userId: doc.userId,
+          contextId: doc.contextId,
+          context: {
+            id: doc.contextId,
+            name: ctx.name || 'General',
+            color: ctx.color || '#3b82f6',
+            icon: ctx.icon || 'briefcase',
+          },
+          projectId: doc.projectId || null,
+          title: doc.title,
+          description: doc.description || '',
+          status: doc.status,
+          waitingReason: doc.waitingReason || null,
+          waitingSince: doc.waitingSince ? doc.waitingSince.toISOString() : null,
+          priority: doc.priority || 'medium',
+          estimatedMinutes: doc.estimatedMinutes || 30,
+          dueDate: doc.dueDate || null,
+          scheduledStart: doc.scheduledStart || null,
+          scheduledEnd: doc.scheduledEnd || null,
+          calendarEventId: doc.calendarEventId || null,
+          source: doc.source || 'manual',
+          xpValue: doc.xpValue || 25,
+          completedAt: doc.completedAt ? doc.completedAt.toISOString() : null,
+          createdAt: doc.createdAt ? doc.createdAt.toISOString() : null,
+          updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
+        };
+      });
+    } catch (err) {
+      logger.warn('Failed to query tasks from MongoDB, falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite Fallback
   let query = `
     SELECT t.*,
       c.name as context_name, c.color as context_color, c.icon as context_icon,
@@ -9,9 +67,9 @@ export function getTasks(userId, filters = {}) {
     FROM tasks t
     LEFT JOIN contexts c ON t.context_id = c.id
     LEFT JOIN projects p ON t.project_id = p.id
-    WHERE t.user_id = ?
+    WHERE 1=1
   `;
-  const params = [userId];
+  const params = [];
 
   if (filters.contextId) {
     query += ' AND t.context_id = ?';
@@ -28,7 +86,6 @@ export function getTasks(userId, filters = {}) {
     params.push(filters.status);
   }
 
-  // User specifically requested: Filter out tasks blocked by external approvals (like boss reviews) from active daily views
   if (filters.excludeWaiting) {
     query += " AND t.status != 'waiting_for'";
   }
@@ -45,11 +102,47 @@ export function getTasks(userId, filters = {}) {
   query += " ORDER BY CASE t.status WHEN 'in_progress' THEN 1 WHEN 'todo' THEN 2 WHEN 'waiting_for' THEN 3 ELSE 4 END, t.created_at DESC";
 
   const rows = db.prepare(query).all(...params);
-
   return rows.map(mapTaskRow);
 }
 
-export function getTaskById(userId, id) {
+export async function getTaskById(userId = 'default_user', id) {
+  if (isMongoConnected()) {
+    try {
+      const doc = await Task.findById(id).lean();
+      if (doc) {
+        const ctx = await Context.findById(doc.contextId).lean();
+        return {
+          id: doc._id.toString(),
+          userId: doc.userId,
+          contextId: doc.contextId,
+          context: {
+            id: doc.contextId,
+            name: ctx?.name || 'General',
+            color: ctx?.color || '#3b82f6',
+            icon: ctx?.icon || 'briefcase',
+          },
+          projectId: doc.projectId || null,
+          title: doc.title,
+          description: doc.description || '',
+          status: doc.status,
+          waitingReason: doc.waitingReason || null,
+          waitingSince: doc.waitingSince ? doc.waitingSince.toISOString() : null,
+          priority: doc.priority || 'medium',
+          estimatedMinutes: doc.estimatedMinutes || 30,
+          dueDate: doc.dueDate || null,
+          scheduledStart: doc.scheduledStart || null,
+          scheduledEnd: doc.scheduledEnd || null,
+          calendarEventId: doc.calendarEventId || null,
+          source: doc.source || 'manual',
+          xpValue: doc.xpValue || 25,
+          completedAt: doc.completedAt ? doc.completedAt.toISOString() : null,
+          createdAt: doc.createdAt ? doc.createdAt.toISOString() : null,
+          updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
+        };
+      }
+    } catch {}
+  }
+
   const row = db.prepare(`
     SELECT t.*,
       c.name as context_name, c.color as context_color, c.icon as context_icon,
@@ -57,19 +150,47 @@ export function getTaskById(userId, id) {
     FROM tasks t
     LEFT JOIN contexts c ON t.context_id = c.id
     LEFT JOIN projects p ON t.project_id = p.id
-    WHERE t.id = ? AND t.user_id = ?
-  `).get(id, userId);
+    WHERE t.id = ?
+  `).get(id);
 
   return row ? mapTaskRow(row) : null;
 }
 
-export function createTask(userId, data) {
-  const id = `tsk-${randomUUID()}`;
-  const now = new Date().toISOString();
-
+export async function createTask(userId = 'default_user', data) {
   const status = data.status || 'todo';
+  const now = new Date();
   const waitingSince = status === 'waiting_for' ? now : null;
   const waitingReason = status === 'waiting_for' ? (data.waitingReason || 'Awaiting external approval') : null;
+
+  if (isMongoConnected()) {
+    try {
+      const doc = await Task.create({
+        userId,
+        contextId: data.contextId,
+        projectId: data.projectId || null,
+        title: data.title.trim(),
+        description: data.description || '',
+        status,
+        waitingReason,
+        waitingSince,
+        priority: data.priority || 'medium',
+        estimatedMinutes: data.estimatedMinutes || 30,
+        dueDate: data.dueDate || null,
+        scheduledStart: data.scheduledStart || null,
+        scheduledEnd: data.scheduledEnd || null,
+        source: data.source || 'manual',
+        xpValue: data.xpValue || 25,
+      });
+
+      return getTaskById(userId, doc._id.toString());
+    } catch (err) {
+      logger.warn('Failed to insert task into MongoDB, falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite Fallback
+  const id = `tsk-${randomUUID()}`;
+  const nowIso = now.toISOString();
 
   db.prepare(`
     INSERT INTO tasks (
@@ -88,31 +209,31 @@ export function createTask(userId, data) {
     data.description || '',
     status,
     waitingReason,
-    waitingSince,
+    waitingSince ? nowIso : null,
     data.priority || 'medium',
     data.estimatedMinutes || 30,
     data.dueDate || null,
     data.scheduledStart || null,
     data.scheduledEnd || null,
     data.source || 'manual',
-    data.sourceExternalId || null,
-    data.sourceMetadata ? JSON.stringify(data.sourceMetadata) : null,
+    null,
+    null,
     data.xpValue || 25,
     data.energyCost || 1,
-    status === 'done' ? now : null,
-    now,
-    now
+    status === 'done' ? nowIso : null,
+    nowIso,
+    nowIso
   );
 
   return getTaskById(userId, id);
 }
 
-export function updateTask(userId, id, data) {
-  const now = new Date().toISOString();
-  const existing = getTaskById(userId, id);
+export async function updateTask(userId = 'default_user', id, data) {
+  const existing = await getTaskById(userId, id);
   if (!existing) return null;
 
   const status = data.status !== undefined ? data.status : existing.status;
+  const now = new Date();
   let waitingReason = existing.waitingReason;
   let waitingSince = existing.waitingSince;
   let completedAt = existing.completedAt;
@@ -127,12 +248,37 @@ export function updateTask(userId, id, data) {
     waitingReason = null;
     waitingSince = null;
   } else {
-    // Return to todo or in_progress
     completedAt = null;
     waitingReason = null;
     waitingSince = null;
   }
 
+  if (isMongoConnected()) {
+    try {
+      const updatePayload = {
+        status,
+        waitingReason,
+        waitingSince,
+        completedAt,
+      };
+
+      if (data.contextId !== undefined) updatePayload.contextId = data.contextId;
+      if (data.projectId !== undefined) updatePayload.projectId = data.projectId;
+      if (data.title !== undefined) updatePayload.title = data.title.trim();
+      if (data.description !== undefined) updatePayload.description = data.description;
+      if (data.priority !== undefined) updatePayload.priority = data.priority;
+      if (data.estimatedMinutes !== undefined) updatePayload.estimatedMinutes = data.estimatedMinutes;
+      if (data.dueDate !== undefined) updatePayload.dueDate = data.dueDate;
+      if (data.scheduledStart !== undefined) updatePayload.scheduledStart = data.scheduledStart;
+      if (data.scheduledEnd !== undefined) updatePayload.scheduledEnd = data.scheduledEnd;
+
+      await Task.findByIdAndUpdate(id, { $set: updatePayload });
+      return getTaskById(userId, id);
+    } catch {}
+  }
+
+  // SQLite Fallback
+  const nowIso = now.toISOString();
   db.prepare(`
     UPDATE tasks
     SET
@@ -150,7 +296,7 @@ export function updateTask(userId, id, data) {
       scheduled_end = ?,
       completed_at = ?,
       updated_at = ?
-    WHERE id = ? AND user_id = ?
+    WHERE id = ?
   `).run(
     data.contextId !== undefined ? data.contextId : existing.contextId,
     data.projectId !== undefined ? data.projectId : existing.projectId,
@@ -158,27 +304,33 @@ export function updateTask(userId, id, data) {
     data.description !== undefined ? data.description : existing.description,
     status,
     waitingReason,
-    waitingSince,
+    waitingSince ? (typeof waitingSince === 'string' ? waitingSince : waitingSince.toISOString()) : null,
     data.priority !== undefined ? data.priority : existing.priority,
     data.estimatedMinutes !== undefined ? data.estimatedMinutes : existing.estimatedMinutes,
     data.dueDate !== undefined ? data.dueDate : existing.dueDate,
     data.scheduledStart !== undefined ? data.scheduledStart : existing.scheduledStart,
     data.scheduledEnd !== undefined ? data.scheduledEnd : existing.scheduledEnd,
-    completedAt,
-    now,
-    id,
-    userId
+    completedAt ? (typeof completedAt === 'string' ? completedAt : completedAt.toISOString()) : null,
+    nowIso,
+    id
   );
 
   return getTaskById(userId, id);
 }
 
-export function setTaskStatus(userId, id, newStatus, waitingReason = null) {
+export async function setTaskStatus(userId = 'default_user', id, newStatus, waitingReason = null) {
   return updateTask(userId, id, { status: newStatus, waitingReason });
 }
 
-export function deleteTask(userId, id) {
-  const result = db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(id, userId);
+export async function deleteTask(userId = 'default_user', id) {
+  if (isMongoConnected()) {
+    try {
+      const res = await Task.findByIdAndDelete(id);
+      if (res) return true;
+    } catch {}
+  }
+
+  const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
   return result.changes > 0;
 }
 
@@ -194,11 +346,6 @@ function mapTaskRow(row) {
       icon: row.context_icon,
     },
     projectId: row.project_id,
-    project: row.project_id ? {
-      id: row.project_id,
-      name: row.project_name,
-      color: row.project_color,
-    } : null,
     title: row.title,
     description: row.description,
     status: row.status,
@@ -211,7 +358,6 @@ function mapTaskRow(row) {
     scheduledEnd: row.scheduled_end,
     calendarEventId: row.calendar_event_id,
     source: row.source,
-    sourceExternalId: row.source_external_id,
     xpValue: row.xp_value,
     energyCost: row.energy_cost,
     completedAt: row.completed_at,

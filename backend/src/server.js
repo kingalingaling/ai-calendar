@@ -11,14 +11,17 @@ import agendaRoutes from './routes/agendaRoutes.js';
 import contextRoutes from './routes/contextRoutes.js';
 import projectRoutes from './routes/projectRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
-import sheetsRoutes from './routes/sheetsRoutes.js';
 import gamificationRoutes from './routes/gamificationRoutes.js';
 import { initSchema } from './db/database.js';
+import { connectMongoDB } from './db/mongodb.js';
 import { logger } from './utils/logger.js';
 import { TIMEZONE } from './config/timezone.js';
 
-// Initialize SQLite database schema
+// Initialize SQLite database schema (local fallback)
 initSchema();
+
+// Initialize MongoDB connection (for multi-device consistency)
+connectMongoDB();
 
 const app = express();
 
@@ -70,7 +73,6 @@ app.use('/api/agenda', agendaRoutes);
 app.use('/api/contexts', contextRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/tasks', taskRoutes);
-app.use('/api/sheets', sheetsRoutes);
 app.use('/api/gamification', gamificationRoutes);
 
 // Global error handler
